@@ -20,7 +20,7 @@ from pathlib import Path
 import pdfplumber
 
 # Bump when parsing logic changes: stored versions parsed with an older value are re-parsed.
-PARSER_VERSION = 1
+PARSER_VERSION = 2  # 2: header split over two table rows (2024-10-14) was stored as data
 
 COLUMNS = (
     "nr",
@@ -137,7 +137,12 @@ def normalize_table(table: list[list[str | None]]) -> tuple[list[list[str]], int
 
 
 def is_header(cells: list[str]) -> bool:
-    return cells[0].lower().startswith("nr") or cells[7].lower() == "data adresa"
+    # Some pages split the header over two table rows, so no single cell is always present.
+    return (
+        cells[0].lower().startswith("nr")
+        or cells[7].lower() == "data adresa"
+        or (fold(cells[1]).startswith("DENUMIRE") and fold(cells[6]) == "DCI")
+    )
 
 
 def check_header(cells: list[str]) -> None:

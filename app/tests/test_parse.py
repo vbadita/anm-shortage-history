@@ -123,3 +123,23 @@ def test_real_page_with_empty_12th_column_2024():
     r = parse_pdf(FIXTURES / "anm-2024-04-12-p1-12cols.pdf")
     assert r.dropped_empty_columns == 1 and len(r.rows) == 33
     assert r.rows[0].name == "CLOPIXOL 25 mg" and r.rows[0].dci == "ZUCLOPENTHIXOLUM"
+
+
+def test_header_split_over_two_rows_is_not_data():
+    # 2024-10-14 page 1: the second header row has no "Nr crt" and no "Data adresa"
+    partial = [
+        "",
+        "Denumire comerciala",
+        "Forma Farmaceutica",
+        "Concentratie",
+        "Firma Detinatoare",
+        "Tara Detinatoare",
+        "DCI",
+        "",
+        "Tip Notificare",
+        "",
+        "Observatii",
+    ]
+    result = ParseResult()
+    rows_from_table([partial], page_no=1, result=result)
+    assert result.rows == [] and result.header_rows == 1
