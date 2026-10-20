@@ -69,3 +69,20 @@ def test_gives_up_after_max_retries():
     client, session, _ = make([500] * 3, max_retries=2)
     assert client.get("u", "live").status_code == 500
     assert len(session.calls) == 3
+
+
+def test_stop_flag_raises_before_next_request():
+    from anm_collector.http import STOP, Terminated
+
+    client, session, _ = make([200, 200])
+    client.get("u", "live")
+    STOP.set()
+    try:
+        try:
+            client.get("u", "live")
+            raise AssertionError("expected Terminated")
+        except Terminated:
+            pass
+        assert len(session.calls) == 1  # the second request was never sent
+    finally:
+        STOP.clear()

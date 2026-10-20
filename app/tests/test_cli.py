@@ -48,3 +48,26 @@ def test_lock_held_exits_2_without_touching_data(monkeypatch, tmp_path, capsys):
     assert code == cli.EXIT_FATAL
     assert [entry["event"] for entry in lines] == ["lock_held"]
     assert not (tmp_path / "manifest.csv").exists()
+
+
+def test_sigterm_mid_run_ends_cleanly(monkeypatch, tmp_path, capsys):
+    import os
+    import signal
+
+    from anm_collector.http import STOP
+
+    monkeypatch.setenv("ANM_DATA_DIR", str(tmp_path))
+
+    def sync(self):
+        os.kill(os.getpid(), signal.SIGTERM)  # what the kubelet sends on pod deletion
+        return self.client.get("https://example.invalid/", source="live")
+
+    monkeypatch.setattr(cli.Collector, "sync", sync)
+    try:
+        code = cli.main(["sync"])
+    finally:
+        STOP.clear()
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    events = [json.loads(line)["event"] for line in capsys.readouterr().out.splitlines()]
+    assert code == cli.EXIT_FATAL
+    assert events == ["run_start", "run_terminated", "run_end"]  # no request was made

@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: anm-sync
+  namespace: anm
+  labels:
+    app.kubernetes.io/name: anm-collector
+    app.kubernetes.io/component: sync
+spec:
+  schedule: "17 9 * * *"             # 09:17 daily; off the :00 rush most CronJobs use
+  timeZone: Europe/Bucharest         # follows DST; without it the schedule is in UTC
+  concurrencyPolicy: Forbid          # never start a run while the previous one is active
+  startingDeadlineSeconds: 3600      # missed (controller down)? still start if < 1h late, else skip
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        app.kubernetes.io/name: anm-collector
+        app.kubernetes.io/component: sync
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 900     # a sync takes ~1 s; 15 min means something is stuck
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: anm-collector
+            app.kubernetes.io/component: sync
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            fsGroupChangePolicy: OnRootMismatch
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: collector
+              image: anm-collector:e4e348a
+              imagePullPolicy: IfNotPresent
+              args: ["sync"]
+              envFrom:
+                - configMapRef:
+                    name: anm-config
+              resources:
+                requests: {cpu: 50m, memory: 64Mi, ephemeral-storage: 50Mi}
+                limits: {memory: 256Mi, ephemeral-storage: 100Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: anm-data

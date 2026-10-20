@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: anm-backfill
+  namespace: anm
+  labels:
+    app.kubernetes.io/name: anm-collector
+    app.kubernetes.io/component: backfill
+spec:
+  backoffLimit: 2                    # 3 pod attempts in total, then the Job is Failed
+  activeDeadlineSeconds: 3600        # hard stop for the whole Job (all attempts)
+  ttlSecondsAfterFinished: 604800    # keep Job + pod (and its logs) 7 days, then GC
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: anm-collector
+        app.kubernetes.io/component: backfill
+    spec:
+      restartPolicy: Never           # failed attempt = new pod; the failed one stays for its logs
+      automountServiceAccountToken: false   # the job never talks to the Kubernetes API
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001               # volume files get group 10001 (where the driver supports it)
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: collector
+          image: anm-collector:e4e348a
+          imagePullPolicy: IfNotPresent   # loaded with `kind load`; no registry yet
+          args: ["backfill"]
+          envFrom:
+            - configMapRef:
+                name: anm-config
+          resources:
+            requests: {cpu: 50m, memory: 64Mi, ephemeral-storage: 50Mi}
+            limits: {memory: 256Mi, ephemeral-storage: 100Mi}   # no CPU limit: see README
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: anm-data

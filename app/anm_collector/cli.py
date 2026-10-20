@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import signal
 import sys
 import time
 import traceback
@@ -16,7 +17,7 @@ import requests
 from .collector import Collector, RunResult, build_report, write_candidates
 from .config import Config
 from .discovery import DiscoveryError
-from .http import PoliteClient
+from .http import STOP, PoliteClient, Terminated
 from .logs import log, setup_logging
 from .metrics import RunMetrics
 from .storage import Catalog, LockHeld, Manifest, RawStore, RunLock
@@ -61,6 +62,9 @@ def _run(argv: list[str] | None) -> int:
         return EXIT_OK
 
     try:
+        # Python ignores SIGTERM as PID 1 (no default action for init); without a
+        # handler the kubelet waits terminationGracePeriodSeconds, then SIGKILLs.
+        signal.signal(signal.SIGTERM, lambda signum, frame: STOP.set())
         with RunLock(cfg.data_dir / ".lock"):
             return _collect(args.mode, cfg, started)
     except LockHeld as exc:
@@ -107,6 +111,16 @@ def _collect(mode: str, cfg: Config, started: float) -> int:
         report = build_report(manifest.rows, result)
         (cfg.data_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         exit_code = EXIT_OK if result.ok else EXIT_DOWNLOAD_FAILED
+    except Terminated:
+        log(
+            "run_terminated",
+            logging.WARNING,
+            phase="shutdown",
+            mode=mode,
+            result="stopped",
+            manifest_rows=len(manifest.rows),
+        )
+        exit_code = EXIT_FATAL
     # RequestException subclasses OSError, so it must be caught first.
     except (DiscoveryError, requests.RequestException) as exc:
         log("run_fatal", logging.ERROR, phase="discover", mode=mode, error=str(exc))

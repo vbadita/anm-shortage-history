@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import threading
 import time
 from collections.abc import Callable
 
@@ -17,6 +18,18 @@ RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504, 520, 522, 524})
 # on_request(source, status_code_or_"error", duration_seconds) -> metrics in Phase 2
 RequestHook = Callable[[str, str, float], None]
 
+# Set by the SIGTERM handler. Checked before every request and woken from every
+# sleep, so a pod being deleted stops within ~1 request instead of being SIGKILLed.
+STOP = threading.Event()
+
+
+class Terminated(RuntimeError):
+    """Raised at the next safe point after SIGTERM."""
+
+
+def _interruptible_sleep(seconds: float) -> None:
+    STOP.wait(seconds)  # returns early when STOP is set
+
 
 class PoliteClient:
     def __init__(
@@ -29,7 +42,7 @@ class PoliteClient:
         on_request: RequestHook | None = None,
         session: requests.Session | None = None,
         clock: Callable[[], float] = time.monotonic,
-        sleep: Callable[[float], None] = time.sleep,
+        sleep: Callable[[float], None] = _interruptible_sleep,
     ) -> None:
         self.min_interval = min_interval
         self.timeout = timeout
@@ -62,6 +75,8 @@ class PoliteClient:
         resp: requests.Response | None = None
         for attempt in range(self.max_retries + 1):
             self._wait_turn()
+            if STOP.is_set():
+                raise Terminated("SIGTERM received")
             start = self._clock()
             try:
                 resp = self.session.get(url, timeout=(10, self.timeout))

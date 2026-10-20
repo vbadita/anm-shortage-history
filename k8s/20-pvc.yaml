@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: anm-data
+  namespace: anm
+  labels:
+    app.kubernetes.io/name: anm-collector
+spec:
+  accessModes: [ReadWriteOnce]       # mountable read-write by pods on ONE node
+  storageClassName: standard         # kind: rancher local-path (a directory on the node)
+  resources:
+    requests:
+      storage: 1Gi                   # 23 MB today, ~2.5 MB per new version

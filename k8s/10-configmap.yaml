@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: anm-config
+  namespace: anm
+  labels:
+    app.kubernetes.io/name: anm-collector
+data:
+  ANM_DATA_DIR: /data
+  ANM_MIN_INTERVAL_SECONDS: "2.0"   # politeness: >= 2.0 is enforced by the app
+  ANM_HTTP_TIMEOUT_SECONDS: "60"
+  ANM_MAX_RETRIES: "4"
+  ANM_STORAGE_BACKEND: local
+  ANM_PUSHGATEWAY_URL: ""           # empty = no push; set in Phase 5 (in-cluster Pushgateway)
