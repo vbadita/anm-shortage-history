@@ -92,3 +92,18 @@ scheduler problems, pushes failing).
 `promtool test rules` with synthetic series and expected alerts at given times, run in CI with the same Prometheus
 version as production. Check that tests can fail (mutation test). Watch the 5-minute lookback delta when choosing
 sample intervals.
+
+## Public exposure (Cloudflare + nginx)
+**With Cloudflare in front, do you still need a certificate on the server?**
+Yes: there are two TLS legs. Cloudflare's edge cert covers browser→Cloudflare. Cloudflare→origin needs its own cert;
+in Full (strict) Cloudflare verifies it, so use a Cloudflare Origin CA cert (trusted only by Cloudflare) or a public
+one. "Flexible" mode sends that leg in plain HTTP.
+
+**How do you stop people bypassing the CDN/WAF?**
+Allow the origin port only from the CDN's published IP ranges (firewall ipset, refreshed on a timer), and/or require
+Cloudflare's client certificate (Authenticated Origin Pulls / mTLS). Also refuse TLS for unknown SNI so scanners of the
+raw IP learn nothing. Trust `CF-Connecting-IP` only from those same ranges, or clients can spoof their IP.
+
+**nginx returns 502 and the error log says "connect() … (13: Permission denied)". Cause?**
+SELinux: `httpd_t` may not connect to arbitrary ports. Check `ausearch -m AVC`. Narrow fix: label the upstream port
+`http_port_t` and enable `httpd_can_network_relay`; `httpd_can_network_connect` (any port) is broader than needed.

@@ -1,0 +1,8 @@
+[Unit]
+Description=Sync Cloudflare IP ranges into firewalld ipsets and nginx real_ip config
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/update-cloudflare-ips.sh

@@ -275,3 +275,44 @@ lookback delta, or the series is "absent" between samples and `for:` never compl
 | Requests by status code | `sum by (source, status_code) (anm_requests_total)` | what the last run asked and got back (live/cdx/wayback × 200/404/503/error) |
 | Downloads by result | `sum by (result) (anm_downloads_total)` | new / duplicate / failed / invalid in the last run |
 | Latency p50/p95 | `histogram_quantile(0.95, sum by (le, source) (anm_request_duration_seconds_bucket))` | estimated request latency; interpolated inside buckets, so with few samples it is only as precise as the bucket bounds |
+
+## Public access: https://apps.badita.com/anm/ (Grafana)
+
+```
+Browser ──TLS (Cloudflare edge cert)──► Cloudflare ──TLS, Full (strict)──► VM :443 nginx 1.26 ──► 172.18.0.2:30300
+                                        WAF / DDoS     Origin CA cert         firewalld: Cloudflare   kind node NodePort
+                                                       (apps.badita.com,      IP ranges only           (Docker bridge,
+                                                        valid to 2041)                                  not public)
+```
+
+Only Grafana is exposed (it has its own login; signup and anonymous access disabled, `cookie_secure`,
+`cookie_samesite=strict`). Prometheus, Alertmanager and the Pushgateway have no authentication and stay private.
+
+| Piece | Where | Notes |
+|---|---|---|
+| DNS | Cloudflare: `apps` A `130.61.172.251`, **proxied** | resolves to Cloudflare anycast IPs, not ours |
+| TLS mode | Cloudflare SSL/TLS: **Full (strict)** | Cloudflare verifies the origin cert |
+| Origin cert | `/etc/nginx/tls/apps.badita.com.{pem,key}` (root, key 0600) | Cloudflare Origin CA; never in Git |
+| nginx site | `deploy/nginx/apps.badita.com.conf` → `/etc/nginx/conf.d/` | `/anm/` → Grafana, everything else 404; unknown SNI → handshake refused |
+| Firewall | `deploy/nginx/update-cloudflare-ips.sh` + weekly `cloudflare-ips.timer` | ipsets `cloudflare-v4/-v6`; 443 accepted only from them; same list feeds nginx `set_real_ip_from` |
+| SELinux | port 30300 → `http_port_t`, `httpd_can_network_relay=on` | narrower than `httpd_can_network_connect` (still off) |
+| Grafana | `grafana.ini.server.root_url=https://apps.badita.com/anm/`, `serve_from_sub_path`, Service NodePort 30300 | in `monitoring/kube-prometheus-stack-values.yaml` |
+
+Install (as root, after the Phase 5 Helm release):
+```bash
+dnf module enable nginx:1.26 && dnf install nginx && dnf versionlock add nginx nginx-core nginx-filesystem
+install -d -m 0700 /etc/nginx/tls   # copy the Origin cert (0644) and key (0600) here
+install -m 0644 deploy/nginx/apps.badita.com.conf /etc/nginx/conf.d/
+install -m 0755 deploy/nginx/update-cloudflare-ips.sh /usr/local/sbin/
+install -m 0644 deploy/nginx/cloudflare-ips.{service,timer} /etc/systemd/system/
+semanage port -a -t http_port_t -p tcp 30300 && setsebool -P httpd_can_network_relay 1
+systemctl daemon-reload && systemctl enable --now cloudflare-ips.timer && systemctl start cloudflare-ips.service
+nginx -t && systemctl enable --now nginx
+```
+
+Verified: through Cloudflare `HTTP 200` with `cf-ray: …-FRA`; origin log shows the real client IP (realip);
+`/`, `/prometheus` → 404; Grafana default password → 401; direct connections to `130.61.172.251:443` from
+external probes (DE, NL, IR) → blocked, while the same probes reach port 22 (control).
+
+Limitations: the upstream is the kind node's Docker bridge IP (changes if the cluster is recreated); the kind node
+container has restart policy `on-failure` — survival across a host reboot is untested.
