@@ -1,0 +1,10 @@
+# raw downloads live on the PVC / object storage, not in Git
+data/raw/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.terraform/
+*.tfstate*
+.env
