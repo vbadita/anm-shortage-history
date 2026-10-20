@@ -1,0 +1,5 @@
+# Allow-list: send only what the Dockerfile copies to the build context.
+*
+!app/requirements.txt
+!app/anm_collector/
+**/__pycache__

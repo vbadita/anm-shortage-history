@@ -7,6 +7,7 @@ import json
 import logging
 import sys
 import time
+import traceback
 import uuid
 from collections import Counter
 
@@ -24,6 +25,22 @@ EXIT_OK, EXIT_DOWNLOAD_FAILED, EXIT_FATAL, EXIT_METRICS_PUSH_FAILED = 0, 1, 2, 3
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point: any unexpected exception becomes one JSON log line and exit 2,
+    never a raw traceback (unsearchable) or exit 1 (which means 'download failed')."""
+    try:
+        return _run(argv)
+    except Exception as exc:
+        log(
+            "run_crashed",
+            logging.ERROR,
+            phase="unknown",
+            error=repr(exc),
+            traceback=traceback.format_exc(),
+        )
+        return EXIT_FATAL
+
+
+def _run(argv: list[str] | None) -> int:
     parser = argparse.ArgumentParser(prog="anm_collector")
     parser.add_argument("mode", choices=["backfill", "sync", "report"])
     parser.add_argument("-v", "--verbose", action="store_true", help="log every HTTP request")
@@ -64,16 +81,22 @@ def main(argv: list[str] | None = None) -> int:
 
     result: RunResult | None = None
     discovered: int | None = None
+    report = None
     try:
         result, cands = collector.backfill() if args.mode == "backfill" else collector.sync()
         discovered = len(cands)
+        if args.mode == "backfill":
+            write_candidates(cfg.data_dir / "candidates.csv", cands)
+        report = build_report(manifest.rows, result)
+        (cfg.data_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         exit_code = EXIT_OK if result.ok else EXIT_DOWNLOAD_FAILED
+    # RequestException subclasses OSError, so it must be caught first.
     except (DiscoveryError, requests.RequestException) as exc:
         log("run_fatal", logging.ERROR, phase="discover", mode=args.mode, error=str(exc))
         exit_code = EXIT_FATAL
-    else:
-        if args.mode == "backfill":
-            write_candidates(cfg.data_dir / "candidates.csv", cands)
+    except OSError as exc:  # permissions, disk full, read-only filesystem
+        log("run_fatal", logging.ERROR, phase="storage", mode=args.mode, error=repr(exc))
+        exit_code = EXIT_FATAL
 
     success = exit_code == EXIT_OK
     metrics.record_run(result.outcomes if result else Counter(), discovered, manifest.rows)
@@ -82,8 +105,6 @@ def main(argv: list[str] | None = None) -> int:
     if not pushed and exit_code == EXIT_OK:  # a data failure is the more important signal
         exit_code = EXIT_METRICS_PUSH_FAILED
 
-    report = build_report(manifest.rows, result)
-    (cfg.data_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     log(
         "run_end",
         logging.INFO if exit_code == EXIT_OK else logging.ERROR,
