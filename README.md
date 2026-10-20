@@ -316,3 +316,40 @@ external probes (DE, NL, IR) → blocked, while the same probes reach port 22 (c
 
 Limitations: the upstream is the kind node's Docker bridge IP (changes if the cluster is recreated); the kind node
 container has restart policy `on-failure` — survival across a host reboot is untested.
+
+## Phase 5b — Parse the history and search it (Checkpoint A: data)
+
+```
+data/raw/*.pdf ──parse (pdfplumber, cell rectangles)──► data/anm.sqlite ──► search (CLI now, web next)
+                  once per sha256 + PARSER_VERSION          versions, rows (47,894), 3,298 products
+```
+
+```bash
+ANM_DATA_DIR=data PYTHONPATH=app .venv/bin/python -m anm_collector parse            # parse pending versions (~9 s each)
+ANM_DATA_DIR=data PYTHONPATH=app .venv/bin/python -m anm_collector search fraxiparine  # brand, DCI or holder
+```
+
+Modes: `backfill` and `parse` parse everything pending; `sync` parses only what it downloaded (keeps it inside its
+15-minute deadline). A version is parsed once per `PARSER_VERSION`; bumping it re-parses all versions. Exit code `4`:
+a version's layout was not recognised (`LayoutChanged`) — the parser refuses to guess column meaning.
+
+Quirks found by surveying all 68 versions and handled (each has a test on a real page in `app/tests/fixtures/`):
+
+| Quirk | Versions | Handling |
+|---|---|---|
+| US `m/d/yyyy` dates (`1/12/2017` = 12 Jan) | 2019-06 … 2019-11, 2021-11-19 | format by separator; verified against the same row printed `12.01.2017` a version earlier |
+| empty 12th column (extra border line) | 2020-08-28, 2024-04 … 06, … | trailing all-empty columns dropped |
+| text overflowing into the date cell (`M 15.05.2026`) | many | the date is *searched* inside the cell |
+| header split over two table rows | 2024-10-14 | header detected by content (parser v2) |
+| U+2010 hyphen vs `-` (`anti‐factor`) | 2021-11 … 2023-01 | dash variants folded (parser v3): 3,328 → 3,298 products |
+| micro sign `µ` → Greek capital mu after NFKD | all | folded to `u` |
+
+Verification: in 61/68 versions the rows are exactly `Nr crt` 1…N; the other 7 were checked against the PDF text —
+ANM's own numbering gap (2022-11-03 skips 544), ANM's duplicate number (2020-10-19 has 464 twice), and garbled
+numbers from overlapping text; no row lost.
+
+Product = folded name + form + strength. A name-only key would merge 69 genuinely different products
+(VFEND 200 mg tablets vs infusion, SINGULAIR 4 mg chewable vs granules), so it was rejected.
+
+**Known limitations:** truncated cells in a few versions (2024-02-14) create a separate one-version product;
+"not in the current file" means *no longer listed* — ANM does not say whether the shortage ended or the entry was removed.
