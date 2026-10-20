@@ -71,6 +71,7 @@ class RawStore:
         self.root.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.root, prefix=".tmp-")
         try:
+            os.fchmod(fd, 0o644)  # mkstemp creates 0600; raw files are public data
             with os.fdopen(fd, "wb") as fh:
                 fh.write(data)
                 fh.flush()

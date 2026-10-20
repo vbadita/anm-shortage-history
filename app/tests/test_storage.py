@@ -103,4 +103,5 @@ def test_raw_store_never_overwrites(tmp_path):
     assert store.save(b"original", path) is True
     assert store.save(b"something else", path) is False
     assert path.read_bytes() == b"original"
+    assert path.stat().st_mode & 0o777 == 0o644  # readable by other UIDs (parser, backup)
     assert [p.name for p in tmp_path.iterdir()] == [path.name]  # no temp files left
