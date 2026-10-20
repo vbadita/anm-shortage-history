@@ -46,6 +46,7 @@ class Period:
     notice_date: str | None
     resume_raw: str
     remarks: str
+    listed: bool = True  # False: the product was absent from these versions
     source_urls: list[str] = field(default_factory=list)
 
 
@@ -100,24 +101,42 @@ def search(conn: sqlite3.Connection, query: str) -> list[ProductSummary]:
 
 
 def history(conn: sqlite3.Connection, key: str) -> list[Period]:
-    """The product's status over time, one Period per run of unchanged status."""
+    """The product's status over time, one Period per run of unchanged status,
+    from its first appearance to the newest version. Versions in which it is
+    absent become explicit listed=False periods: absence is information too
+    (shortage over, or entry removed - the source does not say which)."""
     cur = conn.execute(
-        """SELECT v.file_date, v.original_url, r.notice_type, r.notice_date, r.resume_raw, r.remarks
+        """SELECT v.file_date, r.notice_type, r.notice_date, r.resume_raw, r.remarks
            FROM rows r JOIN versions v USING (sha256)
            WHERE r.product_key = ? ORDER BY v.file_date, r.notice_date""",
         (key,),
     )
+    # One state per version; if a version lists the product twice, the most
+    # recent notification (last by notice_date) wins.
+    states = {
+        r["file_date"]: (r["notice_type"], r["notice_date"], r["resume_raw"], r["remarks"])
+        for r in cur
+    }
     periods: list[Period] = []
-    for r in cur:
-        state = (r["notice_type"], r["notice_date"], r["resume_raw"], r["remarks"])
+    for v in versions(conn):
+        state = states.get(v.file_date)
+        if state is None and not periods:
+            continue  # before the first appearance
+        listed = state is not None
+        state = state or ("", None, "", "")
         p = periods[-1] if periods else None
-        if p and (p.notice_type, p.notice_date, p.resume_raw, p.remarks) == state:
-            if p.last != r["file_date"]:
-                p.versions += 1
-                p.source_urls.append(r["original_url"])
-            p.last = r["file_date"]
+        if (
+            p
+            and p.listed == listed
+            and (p.notice_type, p.notice_date, p.resume_raw, p.remarks) == state
+        ):
+            p.last = v.file_date
+            p.versions += 1
+            p.source_urls.append(v.original_url)
         else:
             periods.append(
-                Period(r["file_date"], r["file_date"], 1, *state, source_urls=[r["original_url"]])
+                Period(
+                    v.file_date, v.file_date, 1, *state, listed=listed, source_urls=[v.original_url]
+                )
             )
     return periods

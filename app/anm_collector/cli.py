@@ -198,6 +198,9 @@ def _search(cfg: Config, query: str) -> int:
         print(f"  {status}; listed in {p.versions_listed} version(s) since {p.first_seen}")
         for per in queries.history(conn, p.product_key):
             span = per.first if per.first == per.last else f"{per.first} .. {per.last}"
+            if not per.listed:
+                print(f"    {span:<24} -- not listed ({per.versions} version(s)) --")
+                continue
             resume = f", reluare: {per.resume_raw}" if per.resume_raw else ""
             print(
                 f"    {span:<24} {per.notice_type} (notificare {per.notice_date}){resume}"
