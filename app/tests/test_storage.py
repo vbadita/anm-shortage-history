@@ -105,3 +105,15 @@ def test_raw_store_never_overwrites(tmp_path):
     assert path.read_bytes() == b"original"
     assert path.stat().st_mode & 0o777 == 0o644  # readable by other UIDs (parser, backup)
     assert [p.name for p in tmp_path.iterdir()] == [path.name]  # no temp files left
+
+
+# ---- run lock --------------------------------------------------------------
+def test_second_run_lock_is_refused_and_released(tmp_path):
+    from anm_collector.storage import LockHeld, RunLock
+
+    lock_path = tmp_path / ".lock"
+    # flock is per open file: a second open of the same path conflicts
+    with RunLock(lock_path), pytest.raises(LockHeld), RunLock(lock_path):
+        pass
+    with RunLock(lock_path):  # released on exit
+        pass

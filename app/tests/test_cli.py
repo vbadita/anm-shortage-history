@@ -36,3 +36,15 @@ def test_unexpected_exception_is_json_not_traceback(run):
     assert lines[-1]["event"] == "run_crashed"
     assert "RuntimeError('bug')" in lines[-1]["error"]
     assert "Traceback" in lines[-1]["traceback"]
+
+
+def test_lock_held_exits_2_without_touching_data(monkeypatch, tmp_path, capsys):
+    from anm_collector.storage import RunLock
+
+    monkeypatch.setenv("ANM_DATA_DIR", str(tmp_path))
+    with RunLock(tmp_path / ".lock"):
+        code = cli.main(["sync"])
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert code == cli.EXIT_FATAL
+    assert [entry["event"] for entry in lines] == ["lock_held"]
+    assert not (tmp_path / "manifest.csv").exists()

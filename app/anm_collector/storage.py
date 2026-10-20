@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import fcntl
 import hashlib
 import io
 import os
@@ -53,6 +54,35 @@ def sha256_hex(data: bytes) -> str:
 def wayback_digest(data: bytes) -> str:
     """The Wayback CDX 'digest' field: base32(SHA-1(body))."""
     return base64.b32encode(hashlib.sha1(data).digest()).decode()
+
+
+class LockHeld(RuntimeError):
+    pass
+
+
+class RunLock:
+    """Exclusive, non-blocking flock on <data_dir>/.lock so two runs (backfill
+    Job + sync CronJob) never write the manifest at the same time. The kernel
+    drops the lock when the process dies, even on SIGKILL/OOM: no stale locks.
+    Works for a volume mounted on one node (RWO); not reliable on NFS."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._fh = None
+
+    def __enter__(self) -> RunLock:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = self.path.open("a")
+        try:
+            fcntl.flock(self._fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self._fh.close()
+            raise LockHeld(f"another run holds {self.path}") from None
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        fcntl.flock(self._fh, fcntl.LOCK_UN)
+        self._fh.close()
 
 
 class RawStore:
