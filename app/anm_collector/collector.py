@@ -30,6 +30,7 @@ class RunResult:
     not_found: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)  # URL with no good copy at all
     new_versions: int = 0
+    new_sha256: list[str] = field(default_factory=list)  # versions stored this run
 
     @property
     def ok(self) -> bool:
@@ -136,6 +137,8 @@ class Collector:
         for r in rows:
             result.outcomes[f"{r.source}:{r.status}"] += 1
             result.new_versions += r.status == "new"
+            if r.status == "new":
+                result.new_sha256.append(r.sha256)
         if self.catalog.manifest.has_ok_url(cand.url) or any(r.ok for r in rows):
             return
         if rows:  # attempts happened, none produced a valid file

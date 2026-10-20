@@ -43,6 +43,10 @@ class Config:
     def manifest_path(self) -> Path:
         return self.data_dir / "manifest.csv"
 
+    @property
+    def db_path(self) -> Path:
+        return self.data_dir / "anm.sqlite"
+
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Config:
         env = dict(os.environ if env is None else env)

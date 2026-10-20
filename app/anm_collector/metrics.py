@@ -65,6 +65,14 @@ class RunMetrics:
             registry=r,
         )
         self.run_duration = Gauge("anm_run_duration_seconds", "Wall time of the run", registry=r)
+        self.parsed = PromCounter(
+            "anm_parse_versions_total", "Versions parsed this run", ["result"], registry=r
+        )
+        self.unparsed = Gauge(
+            "anm_versions_unparsed",
+            "Stored versions not yet parsed with the current parser version",
+            registry=r,
+        )
 
     # PoliteClient hook: called once per HTTP attempt (retries included)
     def on_request(self, source: str, status_code: str, duration: float) -> None:
@@ -89,6 +97,11 @@ class RunMetrics:
         if stored:
             newest = max(datetime.fromisoformat(r.downloaded_at) for r in stored)
             self.last_new_version.set(newest.timestamp())
+
+    def record_parse(self, parsed: int, failed: int, pending_after: int) -> None:
+        self.parsed.labels("ok").inc(parsed)
+        self.parsed.labels("layout_changed").inc(failed)
+        self.unparsed.set(pending_after)
 
     def finish(self, started_monotonic: float, success: bool) -> None:
         self.run_duration.set(time.monotonic() - started_monotonic)

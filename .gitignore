@@ -9,3 +9,5 @@ __pycache__/
 *.tfstate*
 .env
 data/report.json
+data/anm.sqlite*
+data/.lock

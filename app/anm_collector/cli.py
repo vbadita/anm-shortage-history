@@ -1,4 +1,4 @@
-"""Command line: python -m anm_collector {backfill,sync,report}."""
+"""Command line: python -m anm_collector {backfill,sync,parse,report,search}."""
 
 from __future__ import annotations
 
@@ -11,18 +11,34 @@ import time
 import traceback
 import uuid
 from collections import Counter
+from contextlib import closing
 
 import requests
 
+from . import db, queries
 from .collector import Collector, RunResult, build_report, write_candidates
 from .config import Config
 from .discovery import DiscoveryError
 from .http import STOP, PoliteClient, Terminated
+from .ingest import ParseRun, parse_pending
 from .logs import log, setup_logging
 from .metrics import RunMetrics
 from .storage import Catalog, LockHeld, Manifest, RawStore, RunLock
 
-EXIT_OK, EXIT_DOWNLOAD_FAILED, EXIT_FATAL, EXIT_METRICS_PUSH_FAILED = 0, 1, 2, 3
+EXIT_OK, EXIT_DOWNLOAD_FAILED, EXIT_FATAL, EXIT_METRICS_PUSH_FAILED, EXIT_PARSE_FAILED = (
+    0,
+    1,
+    2,
+    3,
+    4,
+)
+RESULT_NAMES = {
+    0: "ok",
+    1: "download_failed",
+    2: "fatal",
+    3: "metrics_push_failed",
+    4: "parse_failed",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -43,7 +59,8 @@ def main(argv: list[str] | None = None) -> int:
 
 def _run(argv: list[str] | None) -> int:
     parser = argparse.ArgumentParser(prog="anm_collector")
-    parser.add_argument("mode", choices=["backfill", "sync", "report"])
+    parser.add_argument("mode", choices=["backfill", "sync", "parse", "report", "search"])
+    parser.add_argument("query", nargs="?", help="search: brand name, DCI or holder")
     parser.add_argument("-v", "--verbose", action="store_true", help="log every HTTP request")
     args = parser.parse_args(argv)
 
@@ -60,6 +77,8 @@ def _run(argv: list[str] | None) -> int:
     if args.mode == "report":
         print(json.dumps(build_report(Manifest(cfg.manifest_path).rows), indent=2))
         return EXIT_OK
+    if args.mode == "search":
+        return _search(cfg, args.query or "")
 
     try:
         # Python ignores SIGTERM as PID 1 (no default action for init); without a
@@ -101,16 +120,27 @@ def _collect(mode: str, cfg: Config, started: float) -> int:
     collector = Collector(client, Catalog(RawStore(cfg.raw_dir), manifest))
 
     result: RunResult | None = None
+    parse_run: ParseRun | None = None
     discovered: int | None = None
     report = None
     try:
-        result, cands = collector.backfill() if mode == "backfill" else collector.sync()
-        discovered = len(cands)
-        if mode == "backfill":
-            write_candidates(cfg.data_dir / "candidates.csv", cands)
-        report = build_report(manifest.rows, result)
-        (cfg.data_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
-        exit_code = EXIT_OK if result.ok else EXIT_DOWNLOAD_FAILED
+        if mode != "parse":
+            result, cands = collector.backfill() if mode == "backfill" else collector.sync()
+            discovered = len(cands)
+            if mode == "backfill":
+                write_candidates(cfg.data_dir / "candidates.csv", cands)
+            report = build_report(manifest.rows, result)
+            (cfg.data_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+        exit_code = EXIT_OK if result is None or result.ok else EXIT_DOWNLOAD_FAILED
+        # sync parses only what it downloaded (fast, fits its deadline); backfill and
+        # parse handle everything pending (e.g. after a PARSER_VERSION bump).
+        only = set(result.new_sha256) if mode == "sync" and result else None
+        if only is None or only:
+            # closing(): `with conn` alone commits but does NOT close the connection
+            with closing(db.connect(cfg.db_path)) as conn:
+                parse_run = parse_pending(cfg.data_dir, manifest.rows, conn, only=only)
+            if parse_run.failed and exit_code == EXIT_OK:
+                exit_code = EXIT_PARSE_FAILED
     except Terminated:
         log(
             "run_terminated",
@@ -131,6 +161,8 @@ def _collect(mode: str, cfg: Config, started: float) -> int:
 
     success = exit_code == EXIT_OK
     metrics.record_run(result.outcomes if result else Counter(), discovered, manifest.rows)
+    if parse_run:
+        metrics.record_parse(len(parse_run.parsed), len(parse_run.failed), parse_run.pending_after)
     metrics.finish(started, success)
     pushed = not cfg.pushgateway_url or metrics.push(cfg.pushgateway_url, mode, success)
     if not pushed and exit_code == EXIT_OK:  # a data failure is the more important signal
@@ -141,12 +173,37 @@ def _collect(mode: str, cfg: Config, started: float) -> int:
         logging.INFO if exit_code == EXIT_OK else logging.ERROR,
         phase="report",
         mode=mode,
-        result={0: "ok", 1: "download_failed", 2: "fatal", 3: "metrics_push_failed"}[exit_code],
+        result=RESULT_NAMES[exit_code],
         exit_code=exit_code,
         duration_s=round(time.monotonic() - started, 1),
         report=report,
+        parsed=len(parse_run.parsed) if parse_run else 0,
+        parse_failed=len(parse_run.failed) if parse_run else 0,
+        unparsed=parse_run.pending_after if parse_run else None,
     )
     return exit_code
+
+
+def _search(cfg: Config, query: str) -> int:
+    """Human-readable search for the terminal (the web app uses the same queries)."""
+    if not cfg.db_path.exists():
+        print("no database yet: run `parse` first", file=sys.stderr)
+        return EXIT_FATAL
+    conn = db.connect(cfg.db_path, readonly=True)
+    found = queries.search(conn, query)
+    print(f"{len(found)} product(s) for {query!r}")
+    for p in found:
+        status = "LISTED NOW" if p.in_latest else f"not in current file (last {p.last_seen})"
+        print(f"\n* {p.name} | {p.form} | {p.strength} | {p.dci} | {p.holder}")
+        print(f"  {status}; listed in {p.versions_listed} version(s) since {p.first_seen}")
+        for per in queries.history(conn, p.product_key):
+            span = per.first if per.first == per.last else f"{per.first} .. {per.last}"
+            resume = f", reluare: {per.resume_raw}" if per.resume_raw else ""
+            print(
+                f"    {span:<24} {per.notice_type} (notificare {per.notice_date}){resume}"
+                f" - {per.remarks}"
+            )
+    return EXIT_OK
 
 
 if __name__ == "__main__":
