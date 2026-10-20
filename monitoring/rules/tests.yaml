@@ -1,0 +1,184 @@
+# promtool unit tests for anm-rules.yaml. Run: monitoring/rules/test.sh
+# In promtool, time() starts at 0, so a timestamp value of 0 means "at test start".
+rule_files:
+  - anm-rules.spec.yaml
+evaluation_interval: 30s
+
+tests:
+  # ---- AnmSyncStale -------------------------------------------------------
+  - name: stale after 26h without a success, quiet with daily successes
+    interval: 1m
+    input_series:
+      - series: 'anm_last_success_timestamp_seconds{job="anm_collector",mode="sync"}'
+        values: '0x1600'                    # one success at t=0, never again
+    alert_rule_test:
+      - alertname: AnmSyncStale
+        eval_time: 25h                      # young enough
+        exp_alerts: []
+      - alertname: AnmSyncStale
+        eval_time: 26h3m                    # over 26h but still in for: 5m (pending)
+        exp_alerts: []
+      - alertname: AnmSyncStale
+        eval_time: 26h10m
+        exp_alerts:
+          - exp_labels: {severity: critical, service: anm, job: anm_collector, mode: sync}
+            exp_annotations:
+              summary: No successful ANM sync for 1d 2h 10m 0s
+              description: >-
+                The last successful sync was 1d 2h 10m 0s ago (threshold 26h).
+                The CronJob may be suspended, failing, or not scheduled.
+              runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmsyncstale
+
+  - name: daily successes keep it quiet
+    interval: 1m
+    input_series:
+      - series: 'anm_last_success_timestamp_seconds{job="anm_collector",mode="sync"}'
+        values: '0x1439 86400x1439'         # success at t=0, again at t=24h
+    alert_rule_test:
+      - alertname: AnmSyncStale
+        eval_time: 47h
+        exp_alerts: []
+
+  # ---- AnmSyncMetricsMissing ---------------------------------------------
+  - name: absent success metric
+    interval: 1m
+    input_series:
+      - series: 'up{job="prometheus-pushgateway"}'
+        values: '1x60'
+    alert_rule_test:
+      - alertname: AnmSyncMetricsMissing
+        eval_time: 20m                      # pending (for: 30m)
+        exp_alerts: []
+      - alertname: AnmSyncMetricsMissing
+        eval_time: 31m
+        exp_alerts:
+          - exp_labels: {severity: warning, service: anm, job: anm_collector, mode: sync}
+            exp_annotations:
+              summary: No anm_last_success_timestamp_seconds series for the sync job
+              description: >-
+                Prometheus has no success timestamp for mode=sync. Either the Pushgateway lost its
+                data or no sync has ever succeeded; AnmSyncStale cannot evaluate until this is fixed.
+              runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmsyncmetricsmissing
+
+  # ---- AnmDownloadsFailing -----------------------------------------------
+  - name: failed or invalid downloads in the last run
+    interval: 1m
+    input_series:
+      - series: 'anm_downloads_total{job="anm_collector",mode="sync",source="live",result="new"}'
+        values: '1x10'
+      - series: 'anm_downloads_total{job="anm_collector",mode="sync",source="live",result="failed"}'
+        values: '0x4 1x5'                   # a run with 1 failure pushed at t=5m
+      - series: 'anm_downloads_total{job="anm_collector",mode="sync",source="wayback",result="invalid"}'
+        values: '0x4 1x5'
+    alert_rule_test:
+      - alertname: AnmDownloadsFailing
+        eval_time: 3m
+        exp_alerts: []
+      - alertname: AnmDownloadsFailing
+        eval_time: 6m
+        exp_alerts:
+          - exp_labels: {severity: warning, service: anm, job: anm_collector, mode: sync}
+            exp_annotations:
+              summary: Last sync run had 2 failed/invalid downloads
+              description: >-
+                failed = HTTP/network error, invalid = content failed the magic-byte check
+                (e.g. an HTML page served as .pdf). See the run's logs for the URLs.
+              runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmdownloadsfailing
+
+  # ---- AnmJobFailed --------------------------------------------------------
+  - name: only the newest CronJob Job counts; standalone Jobs always count
+    interval: 1m
+    input_series:
+      # CronJob anm-sync: older run failed, newer run succeeded -> no alert for it
+      - series: 'kube_job_owner{namespace="anm",job_name="anm-sync-1",owner_kind="CronJob",owner_name="anm-sync"}'
+        values: '1x10'
+      - series: 'kube_job_status_start_time{namespace="anm",job_name="anm-sync-1"}'
+        values: '100x10'
+      - series: 'kube_job_failed{namespace="anm",job_name="anm-sync-1",condition="true"}'
+        values: '1x10'
+      - series: 'kube_job_owner{namespace="anm",job_name="anm-sync-2",owner_kind="CronJob",owner_name="anm-sync"}'
+        values: '1x10'
+      - series: 'kube_job_status_start_time{namespace="anm",job_name="anm-sync-2"}'
+        values: '200x10'
+      - series: 'kube_job_failed{namespace="anm",job_name="anm-sync-2",condition="true"}'
+        values: '0x10'
+      # backfill: one pod failed but the Job succeeded (what we saw in Phase 4) -> no alert
+      - series: 'kube_job_owner{namespace="anm",job_name="anm-backfill"}'
+        values: '1x10'
+      - series: 'kube_job_status_failed{namespace="anm",job_name="anm-backfill"}'
+        values: '1x10'
+      - series: 'kube_job_failed{namespace="anm",job_name="anm-backfill",condition="true"}'
+        values: '0x10'
+    alert_rule_test:
+      - alertname: AnmJobFailed
+        eval_time: 5m
+        exp_alerts: []
+
+  - name: newest CronJob Job failed
+    interval: 1m
+    input_series:
+      - series: 'kube_job_owner{namespace="anm",job_name="anm-sync-1",owner_kind="CronJob",owner_name="anm-sync"}'
+        values: '1x10'
+      - series: 'kube_job_status_start_time{namespace="anm",job_name="anm-sync-1"}'
+        values: '100x10'
+      - series: 'kube_job_failed{namespace="anm",job_name="anm-sync-1",condition="true"}'
+        values: '0x10'
+      - series: 'kube_job_owner{namespace="anm",job_name="anm-sync-2",owner_kind="CronJob",owner_name="anm-sync"}'
+        values: '1x10'
+      - series: 'kube_job_status_start_time{namespace="anm",job_name="anm-sync-2"}'
+        values: '200x10'
+      - series: 'kube_job_failed{namespace="anm",job_name="anm-sync-2",condition="true"}'
+        values: '1x10'
+    alert_rule_test:
+      - alertname: AnmJobFailed
+        eval_time: 2m
+        exp_alerts:
+          - exp_labels: {severity: critical, service: anm, namespace: anm, job_name: anm-sync-2, condition: "true"}
+            exp_annotations:
+              summary: Job anm/anm-sync-2 failed
+              description: >-
+                The Job exhausted its backoffLimit or hit activeDeadlineSeconds.
+                kubectl -n anm describe job anm-sync-2
+              runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmjobfailed
+
+  - name: standalone backfill Job failed
+    interval: 1m
+    input_series:
+      - series: 'kube_job_owner{namespace="anm",job_name="anm-backfill"}'
+        values: '1x10'
+      - series: 'kube_job_failed{namespace="anm",job_name="anm-backfill",condition="true"}'
+        values: '1x10'
+    alert_rule_test:
+      - alertname: AnmJobFailed
+        eval_time: 2m
+        exp_alerts:
+          - exp_labels: {severity: critical, service: anm, namespace: anm, job_name: anm-backfill, condition: "true"}
+            exp_annotations:
+              summary: Job anm/anm-backfill failed
+              description: >-
+                The Job exhausted its backoffLimit or hit activeDeadlineSeconds.
+                kubectl -n anm describe job anm-backfill
+              runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmjobfailed
+
+  # ---- AnmNoNewVersionLong -------------------------------------------------
+  - name: no new version for 30 days
+    # Samples must be closer than the 5m lookback delta: with 1h spacing the series
+    # is "absent" between samples and `for: 1h` keeps resetting (learned the hard way).
+    interval: 2m
+    input_series:
+      - series: 'anm_last_new_version_timestamp_seconds{job="anm_collector",mode="sync"}'
+        values: '0x23000'
+    alert_rule_test:
+      - alertname: AnmNoNewVersionLong
+        eval_time: 29d
+        exp_alerts: []
+      - alertname: AnmNoNewVersionLong
+        eval_time: 31d
+        exp_alerts:
+          - exp_labels: {severity: info, service: anm, job: anm_collector, mode: sync}
+            exp_annotations:
+              summary: No new ANM file for 31d 0h 0m 0s
+              description: >-
+                Not necessarily a fault: ANM's median gap is ~36 days. Check that the page still
+                links the file from the same place (the source may have moved).
+              runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmnonewversionlong

@@ -194,3 +194,84 @@ the Job created the replacement pod while the old one was still terminating — 
 - The kind node has 1 CPU and the control plane already requests 950m: only one of our pods fits at a time.
   Monitoring components in Phase 5 need reduced CPU requests.
 - `flock` protects writers on one node (RWO). It is not reliable on NFS/RWX volumes.
+
+## Phase 5 — Prometheus, Grafana, alert rules
+
+```
+CronJob pod ──push──► Pushgateway (PVC + --persistence.file) ◄──scrape, honor_labels──┐
+kube-state-metrics (Job/CronJob state) ◄─────────────────────────────scrape────────────┤
+                                       Prometheus v3.15.0 ── PrometheusRule anm-collector ──► Alertmanager
+                                            ▲
+                       Grafana 13.2.3 ──────┘  dashboard "ANM collector" from ConfigMap anm-dashboard
+```
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+kubectl create namespace monitoring
+kubectl -n monitoring create secret generic grafana-admin \
+  --from-literal=admin-user=admin --from-literal=admin-password="$(openssl rand -base64 24)"   # not in Git
+helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 91.9.0 \
+  -n monitoring -f monitoring/kube-prometheus-stack-values.yaml --wait
+helm upgrade --install prometheus-pushgateway prometheus-community/prometheus-pushgateway --version 3.9.0 \
+  -n monitoring -f monitoring/pushgateway-values.yaml --wait
+kubectl apply -f monitoring/rules/anm-rules.yaml
+kubectl -n monitoring create configmap anm-dashboard --from-file=monitoring/dashboards/anm-collector.json \
+  --dry-run=client -o yaml | kubectl label --local -f - grafana_dashboard=1 -o yaml | kubectl apply -f -
+monitoring/rules/test.sh        # promtool check + unit tests (Prometheus v3.15.0 image, pinned by digest)
+```
+
+Chart versions: kube-prometheus-stack **91.9.0** (last of the 91.x major; 92.0.0 was a fresh major exactly at
+the 2-week cut-off), prometheus-pushgateway **3.9.0** (Pushgateway v1.11.3).
+
+Sizing for the 1-CPU kind node: CoreDNS scaled to 1 replica (no HA on one node anyway), every component has
+a small explicit CPU request (requests are scheduling reservations; total for monitoring ≈ 75m), no CPU limits.
+kind's etcd/scheduler/controller-manager/kube-proxy listen on 127.0.0.1 inside the node, so their scrape jobs
+and rules are disabled (they would be permanently DOWN). Result: 14/14 targets `up`.
+
+**`honor_labels: true`** on the Pushgateway ServiceMonitor: series keep the labels the job pushed
+(`job="anm_collector", mode="sync"`). Without it Prometheus resolves the conflict by renaming them to
+`exported_job` and stamping `job="prometheus-pushgateway"` on everything — every pushing job would look the same.
+
+**Pushgateway persistence:** the chart mounts a PVC at `/data` but only `--persistence.file` makes the process use
+it (found after the first install). Verified: value identical before and after deleting the pod.
+
+### Alert rules (`monitoring/rules/anm-rules.yaml`), in plain words
+
+| Alert | PromQL (simplified) | In plain words | Severity |
+|---|---|---|---|
+| AnmSyncStale | `time() - max by (job, mode) (anm_last_success_timestamp_seconds{mode="sync"}) > 26*3600` for 5m | "now" minus "when the last sync succeeded" is more than 26 hours | critical |
+| AnmSyncMetricsMissing | `absent(anm_last_success_timestamp_seconds{mode="sync"})` for 30m | the success timestamp does not exist at all, so the rule above cannot fire | warning |
+| AnmDownloadsFailing | `sum by (job, mode) (anm_downloads_total{result=~"failed\|invalid"}) > 0` | the last run counted at least one failed or invalid download (counters are per run) | warning |
+| AnmJobFailed | newest CronJob Job with `kube_job_failed{condition="true"}`, **or** a failed Job without a CronJob owner | the most recent sync Job gave up (backoffLimit / deadline), or the backfill Job did | critical |
+| AnmNoNewVersionLong | `time() - max(anm_last_new_version_timestamp_seconds{mode="sync"}) > 30*86400` for 1h | no new file for 30 days | info |
+
+Recording rule `anm:cronjob_job_start_time_seconds` = `kube_job_status_start_time * on (namespace, job_name)
+group_left (owner_name) kube_job_owner{owner_kind="CronJob"}`: "the start time of every Job, labelled with the
+CronJob that created it". `kube_job_owner` is always 1, so the multiplication keeps the start time; `group_left`
+copies `owner_name` across. AnmJobFailed then keeps only Jobs whose start time equals the max for their CronJob.
+
+Why not `kube_job_status_failed > 0`? It counts failed **pods** — the Phase 4 backfill shows 1 although the Job
+succeeded on retry. A mutation test (swapping in that expression) makes 3 promtool tests fail, including a false
+critical alert for `anm-backfill`.
+
+**AnmNoNewVersionLong and the data:** of 67 historical gaps between versions, 38 exceeded 30 days (median 36 d,
+p90 108 d). At 30 days the alert mostly reports ANM's normal rhythm; ~90 days (9 of 67) would mean "unusual".
+Kept at 30 days / info as specified.
+
+Unit tests: `monitoring/rules/tests.yaml`, 11 cases (stale vs. daily successes, absent, failed+invalid, newest
+vs. older CronJob Jobs, standalone Job, 30-day gap). Lesson: test samples must be closer than the 5-minute
+lookback delta, or the series is "absent" between samples and `for:` never completes.
+
+### Dashboard "ANM collector" (`monitoring/dashboards/anm-collector.json`)
+
+| Panel | PromQL | In plain words |
+|---|---|---|
+| Last successful sync (age) | `time() - max(anm_last_success_timestamp_seconds{mode="sync"})` | seconds since the last good sync; orange > 24h, red > 26h |
+| Versions stored | `max(anm_versions_unique)` | distinct file versions on disk |
+| Failed/invalid downloads | `sum(anm_downloads_total{result=~"failed\|invalid"})` | problems in the last run; red ≥ 1 |
+| Last new version (age) | `time() - max(anm_last_new_version_timestamp_seconds{mode="sync"})` | how long since ANM published something new |
+| Run duration | `anm_run_duration_seconds` | wall time of the last run, per mode |
+| Versions over time | `max(anm_versions_unique)` | the history growing, one step per new file |
+| Requests by status code | `sum by (source, status_code) (anm_requests_total)` | what the last run asked and got back (live/cdx/wayback × 200/404/503/error) |
+| Downloads by result | `sum by (result) (anm_downloads_total)` | new / duplicate / failed / invalid in the last run |
+| Latency p50/p95 | `histogram_quantile(0.95, sum by (le, source) (anm_request_duration_seconds_bucket))` | estimated request latency; interpolated inside buckets, so with few samples it is only as precise as the bucket bounds |

@@ -1,0 +1,84 @@
+# kube-prometheus-stack 91.9.0 (Prometheus v3.15.0, Operator v0.94.1, Grafana 13.2.3)
+# Sized for a 1-CPU kind node: CPU *requests* are scheduling reservations and only
+# ~150m is unreserved, so every component gets a small explicit request. No CPU
+# limits (throttling only hurts); memory limits protect the node.
+
+# kind binds etcd, scheduler, controller-manager and kube-proxy metrics to 127.0.0.1
+# inside the node, so Prometheus cannot reach them: they would be permanent DOWN
+# targets and firing "...Down" alerts. Disable the scrape config and their rules.
+kubeEtcd: {enabled: false}
+kubeScheduler: {enabled: false}
+kubeControllerManager: {enabled: false}
+kubeProxy: {enabled: false}
+defaultRules:
+  rules:
+    etcd: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeControllerManager: false
+    kubeProxy: false
+
+prometheusOperator:
+  resources:
+    requests: {cpu: 10m, memory: 64Mi}
+    limits: {memory: 256Mi}
+  prometheusConfigReloader:          # sidecar injected into Prometheus and Alertmanager pods
+    resources:
+      requests: {cpu: 1m, memory: 16Mi}
+      limits: {memory: 64Mi}
+
+prometheus:
+  prometheusSpec:
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    retention: 15d
+    retentionSize: 1500MB
+    # By default the Operator only picks up ServiceMonitors/PrometheusRules carrying
+    # this Helm release's label. false = select all, in every namespace.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    resources:
+      requests: {cpu: 30m, memory: 256Mi}
+      limits: {memory: 1Gi}
+    storageSpec:                     # TSDB survives Prometheus pod restarts
+      volumeClaimTemplate:
+        spec:
+          storageClassName: standard
+          accessModes: [ReadWriteOnce]
+          resources: {requests: {storage: 2Gi}}
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: {cpu: 5m, memory: 32Mi}
+      limits: {memory: 128Mi}
+
+grafana:
+  admin:
+    existingSecret: grafana-admin    # created out of band; never in Git (SealedSecret in Phase 8)
+    userKey: admin-user
+    passwordKey: admin-password
+  resources:
+    requests: {cpu: 10m, memory: 128Mi}
+    limits: {memory: 384Mi}
+  sidecar:
+    resources:
+      requests: {cpu: 1m, memory: 32Mi}
+      limits: {memory: 128Mi}
+    dashboards:
+      enabled: true
+      label: grafana_dashboard       # any ConfigMap with this label becomes a dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+
+kube-state-metrics:
+  resources:
+    requests: {cpu: 5m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
+prometheus-node-exporter:
+  resources:
+    requests: {cpu: 5m, memory: 16Mi}
+    limits: {memory: 64Mi}

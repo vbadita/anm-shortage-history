@@ -1,0 +1,21 @@
+# prometheus-pushgateway 3.9.0 (Pushgateway v1.11.3, same version tested in Phase 2)
+serviceMonitor:
+  enabled: true
+  # Without honor_labels Prometheus renames the job's own labels on conflict:
+  # job="anm_collector" pushed by our job would become exported_job="anm_collector"
+  # and job= would be the Pushgateway's scrape job. honor_labels keeps the pushed ones.
+  honorLabels: true
+resources:
+  requests: {cpu: 5m, memory: 16Mi}
+  limits: {memory: 64Mi}
+# Without persistence a Pushgateway restart forgets every pushed value
+# (including anm_last_success_timestamp_seconds). It writes them to this file.
+persistentVolume:
+  enabled: true
+  size: 256Mi
+  storageClass: standard
+# The PVC alone does nothing: the Pushgateway only persists when told to.
+# (Found after the first install: volume mounted at /data, no persistence flag.)
+extraArgs:
+  - --persistence.file=/data/pushgateway.data
+  - --persistence.interval=1m

@@ -75,3 +75,20 @@ replacement pod created while the old one is still terminating can all overlap. 
 Requests reserve capacity for scheduling; a CPU limit enforces CFS throttling even when the node is idle, which
 only slows a short batch job. Memory is different: it cannot be throttled, so a memory limit is what protects the
 node (the container is OOM-killed instead).
+
+## Phase 5 — Prometheus, Grafana, alerts
+**What does `honor_labels: true` do and why does the Pushgateway need it?**
+When a scraped series has a label the scrape config also sets (job, instance), Prometheus keeps its own and renames
+the scraped one to `exported_<label>`. For a Pushgateway the scraped labels are the meaningful ones (the job that
+pushed), so `honor_labels` keeps them. Only use it for targets you trust, since they can then set any label.
+
+**How do you alert that a daily job "stopped working" with Prometheus?**
+Export a "last success" timestamp, alert on its age (`time() - ts > threshold`), and add an `absent()` alert for the
+case where the series disappears (absent data makes threshold alerts silently not fire). Pair with a Job-failure
+alert from kube-state-metrics for fast detection; the freshness alert catches everything else (suspended CronJob,
+scheduler problems, pushes failing).
+
+**How do you test alert rules?**
+`promtool test rules` with synthetic series and expected alerts at given times, run in CI with the same Prometheus
+version as production. Check that tests can fail (mutation test). Watch the 5-minute lookback delta when choosing
+sample intervals.

@@ -1,0 +1,124 @@
+# Alerting rules for the ANM collector. Single source of truth: deployed as-is,
+# and its .spec is unit-tested with promtool (monitoring/rules/test.sh).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: anm-collector
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: anm-collector
+spec:
+  groups:
+    - name: anm.recording
+      rules:
+        # Start time of every Job owned by a CronJob, labelled with that CronJob.
+        # kube_job_owner{...} is always 1, so the product keeps the start time and
+        # group_left copies owner_name onto it.
+        - record: anm:cronjob_job_start_time_seconds
+          expr: |
+            kube_job_status_start_time{namespace="anm"}
+            * on (namespace, job_name) group_left (owner_name)
+            kube_job_owner{namespace="anm", owner_kind="CronJob"}
+
+    - name: anm.alerts
+      rules:
+        - alert: AnmSyncStale
+          # Freshness SLO: a successful daily sync within 26h (24h schedule + 2h for
+          # retries and the 1h startingDeadline). Age, not presence: Pushgateway
+          # values never expire, so "present" proves nothing.
+          expr: |
+            time() - max by (job, mode) (
+              anm_last_success_timestamp_seconds{job="anm_collector", mode="sync"}
+            ) > 26 * 3600
+          for: 5m
+          labels:
+            severity: critical
+            service: anm
+          annotations:
+            summary: No successful ANM sync for {{ $value | humanizeDuration }}
+            description: >-
+              The last successful sync was {{ $value | humanizeDuration }} ago (threshold 26h).
+              The CronJob may be suspended, failing, or not scheduled.
+            runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmsyncstale
+
+        - alert: AnmSyncMetricsMissing
+          # The freshness alert above cannot fire on data that does not exist
+          # (Pushgateway lost its state, or the job never pushed).
+          expr: absent(anm_last_success_timestamp_seconds{job="anm_collector", mode="sync"})
+          for: 30m
+          labels:
+            severity: warning
+            service: anm
+          annotations:
+            summary: No anm_last_success_timestamp_seconds series for the sync job
+            description: >-
+              Prometheus has no success timestamp for mode=sync. Either the Pushgateway lost its
+              data or no sync has ever succeeded; AnmSyncStale cannot evaluate until this is fixed.
+            runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmsyncmetricsmissing
+
+        - alert: AnmDownloadsFailing
+          # Per-run counters: the value is the LAST run's count and stays until the next
+          # push, so this keeps firing until a run completes without failures.
+          expr: |
+            sum by (job, mode) (
+              anm_downloads_total{job="anm_collector", result=~"failed|invalid"}
+            ) > 0
+          labels:
+            severity: warning
+            service: anm
+          annotations:
+            summary: Last {{ $labels.mode }} run had {{ $value }} failed/invalid downloads
+            description: >-
+              failed = HTTP/network error, invalid = content failed the magic-byte check
+              (e.g. an HTML page served as .pdf). See the run's logs for the URLs.
+            runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmdownloadsfailing
+
+        - alert: AnmJobFailed
+          # (1) the NEWEST Job of each CronJob has condition Failed=true — older failed
+          #     Jobs kept by failedJobsHistoryLimit are ignored once a newer run exists;
+          # (2) any Job in the namespace not owned by a CronJob (e.g. anm-backfill) failed.
+          # kube_job_failed is the Job condition; kube_job_status_failed counts failed
+          # PODS and is >0 even for Jobs that succeeded on a retry.
+          expr: |
+            (
+              kube_job_failed{namespace="anm", condition="true"} == 1
+              and on (namespace, job_name)
+              (
+                anm:cronjob_job_start_time_seconds
+                == on (namespace, owner_name) group_left ()
+                max by (namespace, owner_name) (anm:cronjob_job_start_time_seconds)
+              )
+            )
+            or
+            (
+              kube_job_failed{namespace="anm", condition="true"} == 1
+              unless on (namespace, job_name)
+              kube_job_owner{namespace="anm", owner_kind="CronJob"}
+            )
+          labels:
+            severity: critical
+            service: anm
+          annotations:
+            summary: Job {{ $labels.namespace }}/{{ $labels.job_name }} failed
+            description: >-
+              The Job exhausted its backoffLimit or hit activeDeadlineSeconds.
+              kubectl -n {{ $labels.namespace }} describe job {{ $labels.job_name }}
+            runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmjobfailed
+
+        - alert: AnmNoNewVersionLong
+          # Historical gaps (2017-2026): median 36 days, 38 of 67 gaps exceeded 30 days.
+          # At 30 days this fires during normal publishing pauses; info = never paged.
+          expr: |
+            time() - max by (job, mode) (
+              anm_last_new_version_timestamp_seconds{job="anm_collector", mode="sync"}
+            ) > 30 * 86400
+          for: 1h
+          labels:
+            severity: info
+            service: anm
+          annotations:
+            summary: No new ANM file for {{ $value | humanizeDuration }}
+            description: >-
+              Not necessarily a fault: ANM's median gap is ~36 days. Check that the page still
+              links the file from the same place (the source may have moved).
+            runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmnonewversionlong

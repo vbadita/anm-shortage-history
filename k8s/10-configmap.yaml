@@ -11,4 +11,4 @@ data:
   ANM_HTTP_TIMEOUT_SECONDS: "60"
   ANM_MAX_RETRIES: "4"
   ANM_STORAGE_BACKEND: local
-  ANM_PUSHGATEWAY_URL: ""           # empty = no push; set in Phase 5 (in-cluster Pushgateway)
+  ANM_PUSHGATEWAY_URL: http://prometheus-pushgateway.monitoring.svc:9091
