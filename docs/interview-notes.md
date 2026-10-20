@@ -39,3 +39,18 @@ omits `last_success` would erase it and the freshness alert would see *no data* 
 **Why export explicit zeros, e.g. `anm_downloads_total{result="failed"} 0`?**
 A missing series is not zero: `x > 0` on absent data returns nothing, and so does `x == 0`. Pre-creating the
 label combinations makes "no failures" a measurable fact.
+
+## Phase 3 — Container
+**Why a multi-stage build when nothing is compiled?**
+The runtime stage receives only the finished venv: no pip cache, no requirements file, no install-time state.
+With compiled dependencies it also keeps compilers out of the image. Each stage starts from the same pinned base,
+so the venv's absolute paths and Python ABI match.
+
+**Why a numeric UID in `USER`?**
+Kubernetes `runAsNonRoot: true` checks the UID before starting the container; with a user *name* it cannot know
+the name maps to non-zero and refuses to run it. A fixed UID also makes volume ownership predictable.
+
+**Why is `docker images` bigger than the sum of the layers?**
+With the containerd image store, Docker keeps the compressed layer blobs (what registries store and nodes pull)
+and the unpacked snapshots. 48.7 MB compressed + 175 MB unpacked ≈ the 224 MB shown. Optimise the compressed size
+for pull time, the unpacked size for node disk.

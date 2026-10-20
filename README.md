@@ -114,3 +114,35 @@ curl -X DELETE localhost:9091/metrics/job/anm_collector/mode/sync   # drop a gro
 `last_success`, not its presence; no `up` for the job → freshness + kube-state-metrics alerts (Phase 5);
 per-run counters → read them as "last run", never `rate()`; data lost on restart / single point of failure →
 `absent()` alert (Phase 5), Phase 7 case 3.
+
+## Phase 3 — Container image
+
+`Dockerfile` (repo root), two stages on `python:3.12.15-slim-trixie` pinned by multi-arch index digest:
+**builder** creates `/opt/venv` and installs `app/requirements.txt` with `--no-deps` (exactly the lock);
+**runtime** copies only the venv and `app/anm_collector`, precompiles `.pyc` (the root filesystem is
+read-only at runtime) and runs as UID/GID **10001** (numeric, so Kubernetes `runAsNonRoot` can verify it).
+`.dockerignore` is an allow-list: the build context is ~40 kB, `data/`, `.venv/`, `.git/` never leave the host.
+
+```bash
+SHA=$(git rev-parse --short HEAD)
+docker build --build-arg GIT_SHA=$SHA -t anm-collector:$SHA .
+docker volume create anm-data          # empty named volume inherits /data ownership (10001) from the image
+docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --network host -e ANM_PUSHGATEWAY_URL=http://localhost:9091 \
+  -v anm-data:/data anm-collector:$SHA sync
+```
+
+| Layer | Size | Content |
+|---|---|---|
+| Debian 13 rootfs | 108 MB | base |
+| ca-certificates, netbase, tzdata | 4.4 MB | base |
+| CPython 3.12.15 (built from source, build deps purged in the same layer) | 43.8 MB | base |
+| user `anm` + `/data` | 33 kB | ours |
+| `/opt/venv` (requests, urllib3, idna, charset-normalizer, certifi, prometheus_client, pip) | 17.7 MB | ours |
+| `app/anm_collector` + `.pyc` | 1.3 MB | ours |
+
+Sizes: **48.7 MB compressed** (pushed/pulled), 175 MB unpacked. `docker images` shows 224 MB because the
+containerd image store keeps both the compressed blobs and the unpacked snapshot.
+
+A bind-mounted host directory owned by another UID fails with `PermissionError` → logged as JSON
+`run_fatal phase=storage`, exit 2 (Kubernetes solves ownership with `fsGroup`).
