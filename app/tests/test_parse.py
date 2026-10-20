@@ -143,3 +143,18 @@ def test_header_split_over_two_rows_is_not_data():
     result = ParseResult()
     rows_from_table([partial], page_no=1, result=result)
     assert result.rows == [] and result.header_rows == 1
+
+
+def test_dash_variants_give_the_same_product():
+    ascii_hyphen = product_key("FRAXIPARINE 2850 UI anti-factor Xa/0,3 ml", "SOL. INJ.", "2850 ui")
+    unicode_hyphen = product_key(
+        "FRAXIPARINE 2850 UI anti\N{HYPHEN}factor Xa/0,3 ml", "SOL. INJ.", "2850 ui"
+    )
+    assert ascii_hyphen == unicode_hyphen
+
+
+def test_different_forms_stay_different_products():
+    # same brand + strength, different form: must never merge (VFEND tablets vs infusion)
+    assert product_key("VFEND 200 mg", "COMPR. FILM.", "200mg") != product_key(
+        "VFEND 200 mg", "PULB. PT. SOL. PERF.", "200mg"
+    )

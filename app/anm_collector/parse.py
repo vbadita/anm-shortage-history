@@ -20,7 +20,9 @@ from pathlib import Path
 import pdfplumber
 
 # Bump when parsing logic changes: stored versions parsed with an older value are re-parsed.
-PARSER_VERSION = 2  # 2: header split over two table rows (2024-10-14) was stored as data
+# 2: header split over two table rows (2024-10-14) was stored as data
+# 3: dash variants folded to '-' (U+2010 in 2021-11..2023-01 split FRAXIPARINE into two keys)
+PARSER_VERSION = 3
 
 COLUMNS = (
     "nr",
@@ -50,6 +52,7 @@ EXPECTED_HEADER = (
     "observ",
 )
 
+_DASHES = re.compile("[\u2010-\u2015\u2212]")  # hyphen, en/em dash, minus sign
 _DMY = re.compile(r"(?<!\d)(\d{1,2})\.(\d{1,2})\.(\d{4})(?!\d)")
 _MDY = re.compile(r"(?<!\d)(\d{1,2})/(\d{1,2})/(\d{4})(?!\d)")
 
@@ -91,6 +94,7 @@ def fold(text: str) -> str:
     The micro sign becomes 'u' ("20 µg" -> "20 UG"): NFKD turns it into Greek mu,
     which upper-cases to U+039C (Greek capital mu): looks like M, never matches M or U."""
     text = text.replace("\u00b5", "u").replace("\u03bc", "u")  # micro sign, Greek mu
+    text = _DASHES.sub("-", text)
     decomposed = unicodedata.normalize("NFKD", text)
     ascii_ish = "".join(c for c in decomposed if not unicodedata.combining(c))
     return re.sub(r"\s+", " ", ascii_ish).strip().upper()
