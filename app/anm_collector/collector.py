@@ -180,7 +180,7 @@ class Collector:
 
 def write_candidates(path, cands: dict[str, Candidate]) -> None:
     with path.open("w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh)
+        w = csv.writer(fh, lineterminator="\n")
         w.writerow(["file_date", "url", "sources", "wayback_captures"])
         for c in sorted(cands.values(), key=lambda c: (c.file_date or date.min, c.url)):
             w.writerow(

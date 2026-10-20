@@ -122,7 +122,7 @@ class Manifest:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         new_file = not self.path.exists()
         with self.path.open("a", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=MANIFEST_FIELDS)
+            writer = csv.DictWriter(fh, fieldnames=MANIFEST_FIELDS, lineterminator="\n")
             if new_file:
                 writer.writeheader()
             writer.writerow(asdict(row))
