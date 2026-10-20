@@ -76,3 +76,41 @@ folder search, 10 via both, 4 via the known list (2 of them found nowhere else).
   notice (backfill would, via differing Wayback digests).
 - The page is archived from 2017-07; any versions published before that, or under an older page URL, are not covered.
 - Gaps in the history are gaps in what was *linked or archived*, not necessarily in what ANM published.
+
+## Phase 2 — Metrics (Pushgateway)
+
+A `sync` run lives ~1 s; Prometheus pulls every 15–60 s from stable targets. So the job **pushes** its
+metrics at the end of the run to the Pushgateway, which keeps them; Prometheus scrapes the Pushgateway.
+
+Grouping key: `{job="anm_collector", mode="sync|backfill"}` — each mode has its own slot.
+Push method: **POST (pushadd)** — only the metric names present in the push are replaced. A failed run
+does not include `anm_last_success_timestamp_seconds` (the gauge is unregistered, because an unset
+unlabelled gauge would export `0`), so the last real success survives and keeps ageing.
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `anm_requests_total{source,status_code}` | counter (per run) | HTTP attempts incl. retries; `source` = live, cdx, wayback; `status_code="error"` = network error |
+| `anm_request_duration_seconds{source}` | histogram | request latency, buckets 0.1 s … 120 s |
+| `anm_files_discovered` | gauge | candidate URLs found this run (sync: links on the live page) |
+| `anm_versions_unique` | gauge | distinct versions stored (manifest rows with status `new`) |
+| `anm_downloads_total{source,result}` | counter (per run) | result = new, duplicate, failed, invalid; all 8 series always exported (explicit 0) |
+| `anm_last_success_timestamp_seconds` | gauge | set **only** when the run succeeds |
+| `anm_last_new_version_timestamp_seconds` | gauge | newest `new` row in the manifest (survives Pushgateway restarts) |
+| `anm_run_duration_seconds` | gauge | wall time of the run |
+| `push_time_seconds` / `push_failure_time_seconds` | gauge | added by the Pushgateway itself |
+
+Exit code `3`: the run itself was fine but the metrics push failed (a data failure, 1 or 2, takes precedence).
+
+Local Pushgateway:
+```bash
+docker run -d --name pushgateway -p 127.0.0.1:9091:9091 \
+  prom/pushgateway@sha256:74fa117cef2d7e383112d25139ff1c2d2e309c35389a9e0554a47136a1482e48   # v1.11.3
+ANM_PUSHGATEWAY_URL=http://localhost:9091 ANM_DATA_DIR=data PYTHONPATH=app .venv/bin/python -m anm_collector sync
+curl -s localhost:9091/metrics | grep ^anm_
+curl -X DELETE localhost:9091/metrics/job/anm_collector/mode/sync   # drop a group
+```
+
+**Pushgateway downsides (and what we do about them):** values never expire → alert on the *age* of
+`last_success`, not its presence; no `up` for the job → freshness + kube-state-metrics alerts (Phase 5);
+per-run counters → read them as "last run", never `rate()`; data lost on restart / single point of failure →
+`absent()` alert (Phase 5), Phase 7 case 3.

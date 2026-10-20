@@ -8,17 +8,19 @@ import logging
 import sys
 import time
 import uuid
+from collections import Counter
 
 import requests
 
-from .collector import Collector, build_report, write_candidates
+from .collector import Collector, RunResult, build_report, write_candidates
 from .config import Config
 from .discovery import DiscoveryError
 from .http import PoliteClient
 from .logs import log, setup_logging
+from .metrics import RunMetrics
 from .storage import Catalog, Manifest, RawStore
 
-EXIT_OK, EXIT_DOWNLOAD_FAILED, EXIT_FATAL = 0, 1, 2
+EXIT_OK, EXIT_DOWNLOAD_FAILED, EXIT_FATAL, EXIT_METRICS_PUSH_FAILED = 0, 1, 2, 3
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,40 +50,51 @@ def main(argv: list[str] | None = None) -> int:
         mode=args.mode,
         data_dir=str(cfg.data_dir),
         manifest_rows=len(manifest.rows),
+        pushgateway=cfg.pushgateway_url,
     )
+    metrics = RunMetrics()
     client = PoliteClient(
-        cfg.user_agent, cfg.min_interval_seconds, cfg.timeout_seconds, cfg.max_retries
+        cfg.user_agent,
+        cfg.min_interval_seconds,
+        cfg.timeout_seconds,
+        cfg.max_retries,
+        on_request=metrics.on_request,
     )
     collector = Collector(client, Catalog(RawStore(cfg.raw_dir), manifest))
 
+    result: RunResult | None = None
+    discovered: int | None = None
     try:
         result, cands = collector.backfill() if args.mode == "backfill" else collector.sync()
+        discovered = len(cands)
+        exit_code = EXIT_OK if result.ok else EXIT_DOWNLOAD_FAILED
     except (DiscoveryError, requests.RequestException) as exc:
-        log(
-            "run_end",
-            logging.ERROR,
-            phase="discover",
-            mode=args.mode,
-            result="fatal",
-            error=str(exc),
-            duration_s=round(time.monotonic() - started, 1),
-        )
-        return EXIT_FATAL
+        log("run_fatal", logging.ERROR, phase="discover", mode=args.mode, error=str(exc))
+        exit_code = EXIT_FATAL
+    else:
+        if args.mode == "backfill":
+            write_candidates(cfg.data_dir / "candidates.csv", cands)
 
-    if args.mode == "backfill":
-        write_candidates(cfg.data_dir / "candidates.csv", cands)
+    success = exit_code == EXIT_OK
+    metrics.record_run(result.outcomes if result else Counter(), discovered, manifest.rows)
+    metrics.finish(started, success)
+    pushed = not cfg.pushgateway_url or metrics.push(cfg.pushgateway_url, args.mode, success)
+    if not pushed and exit_code == EXIT_OK:  # a data failure is the more important signal
+        exit_code = EXIT_METRICS_PUSH_FAILED
+
     report = build_report(manifest.rows, result)
     (cfg.data_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     log(
         "run_end",
-        logging.INFO if result.ok else logging.ERROR,
+        logging.INFO if exit_code == EXIT_OK else logging.ERROR,
         phase="report",
         mode=args.mode,
-        result="ok" if result.ok else "download_failed",
+        result={0: "ok", 1: "download_failed", 2: "fatal", 3: "metrics_push_failed"}[exit_code],
+        exit_code=exit_code,
         duration_s=round(time.monotonic() - started, 1),
         report=report,
     )
-    return EXIT_OK if result.ok else EXIT_DOWNLOAD_FAILED
+    return exit_code
 
 
 if __name__ == "__main__":

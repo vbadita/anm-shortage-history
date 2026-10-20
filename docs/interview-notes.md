@@ -25,3 +25,17 @@ Write to a temp file in the same directory, fsync, then `os.link(tmp, final)`: t
 **Which errors do you retry?**
 Only those that can succeed later: network errors, timeouts, 429, 5xx — with exponential backoff, jitter (so
 many clients don't retry in lockstep) and `Retry-After`. A 404 is a final answer; retrying it just adds load.
+
+## Phase 2 — Metrics
+**Why can't Prometheus scrape a CronJob directly, and what does the Pushgateway cost you?**
+Pull needs a stable, long-lived target; a 1-second pod is neither. The Pushgateway holds the last pushed values,
+but they never expire (stale data looks healthy), there is no `up` for the job, counters reset every run, and it
+is a single point of failure. Alert on the age of a success timestamp, not on the presence of data.
+
+**PUT vs POST to the Pushgateway?**
+PUT replaces the whole group; POST replaces only the metric names in the request. With PUT, a failed run that
+omits `last_success` would erase it and the freshness alert would see *no data* instead of an *old* timestamp.
+
+**Why export explicit zeros, e.g. `anm_downloads_total{result="failed"} 0`?**
+A missing series is not zero: `x > 0` on absent data returns nothing, and so does `x == 0`. Pre-creating the
+label combinations makes "no failures" a measurable fact.
