@@ -146,3 +146,51 @@ containerd image store keeps both the compressed blobs and the unpacked snapshot
 
 A bind-mounted host directory owned by another UID fails with `PermissionError` → logged as JSON
 `run_fatal phase=storage`, exit 2 (Kubernetes solves ownership with `fsGroup`).
+
+## Phase 4 — Kubernetes (kind, plain YAML)
+
+```
+Namespace anm  (Pod Security Admission: enforce=restricted)
+ ├─ ConfigMap anm-config ──envFrom──┐
+ ├─ PVC anm-data (1Gi, RWO) ──mount /data──┐
+ ├─ Job anm-backfill ──► Pod ──────────────┤   once
+ └─ CronJob anm-sync ──► Job ──► Pod ──────┘   09:17 Europe/Bucharest
+```
+
+```bash
+kind create cluster --config k8s/cluster/kind-config.yaml        # kind v0.33.0, node v1.37.0 (digest)
+SHA=$(git rev-parse --short HEAD); docker build --build-arg GIT_SHA=$SHA -t anm-collector:$SHA .
+kind load docker-image anm-collector:$SHA --name anm              # no registry yet: copy into the node
+kubectl apply -f k8s/00-namespace.yaml && kubectl apply -f k8s/   # namespace must exist first
+kubectl -n anm create job sync-now --from=cronjob/anm-sync        # run the CronJob on demand
+kubectl apply -f k8s/tools/pvc-inspect.yaml && kubectl -n anm logs -f pvc-inspect   # look at /data
+```
+
+| Object | Key settings and why |
+|---|---|
+| Namespace | `pod-security.kubernetes.io/enforce: restricted` — the API server rejects pods that are not non-root, capability-free, seccomp-confined (proven with a plain `kubectl run`: 4 violations, Forbidden) |
+| ConfigMap | all `ANM_*` settings; injected with `envFrom` |
+| PVC | RWO, 1Gi, `standard` (local-path: a directory on the node, `reclaimPolicy: Delete`, `WaitForFirstConsumer`) |
+| Job `anm-backfill` | `backoffLimit: 2`, `activeDeadlineSeconds: 3600`, `ttlSecondsAfterFinished: 7d`, `restartPolicy: Never` (failed pods stay for logs) |
+| CronJob `anm-sync` | `17 9 * * *`, `timeZone: Europe/Bucharest` (09:17 local = 06:17 UTC now, 07:17 UTC after DST ends), `concurrencyPolicy: Forbid`, `startingDeadlineSeconds: 3600`, history 3/3, job `backoffLimit: 2`, `activeDeadlineSeconds: 900` |
+| Pod security | `runAsNonRoot`, UID/GID 10001, `fsGroup` 10001, seccomp `RuntimeDefault`, `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, drop `ALL` capabilities, no service-account token |
+| Resources | requests 50m CPU / 64Mi; limit 256Mi memory; **no CPU limit** (a limit only throttles a 1-second batch job; the request already reserves its share). Measured peak during backfill: 40 MiB |
+
+**What happens to data when a pod dies** (demonstrated): the PVC and its files outlive any pod. Killing the
+backfill pod after 15 downloads → the Job created a new pod, which started with `manifest_rows: 15` and downloaded
+the remaining 53 (15 + 53 = 68, nothing twice). Deleting the **PVC** is what destroys data: with
+`reclaimPolicy: Delete` the PV and its directory on the node were removed (68 files → gone).
+
+**Graceful shutdown:** Python as PID 1 ignores SIGTERM (Linux gives init no default signal actions). Before the
+fix a deleted pod kept downloading for 30 s until the kubelet sent SIGKILL. Now a SIGTERM handler sets a stop flag
+checked before every request: `run_terminated` was logged 108 ms after the signal, the pod was gone in 1.1 s.
+
+**Single writer:** the backfill Job and the sync CronJob share the PVC; `concurrencyPolicy` only stops a CronJob
+overlapping *itself*. A `flock` on `/data/.lock` makes a second run exit 2 (`lock_held`). During the kill test
+the Job created the replacement pod while the old one was still terminating — exactly the overlap the lock covers.
+
+### Known limitations (local cluster)
+- local-path does **not enforce** the PVC size (`df` in the pod shows the host's 30 GB disk); "PVC full" must be simulated.
+- The kind node has 1 CPU and the control plane already requests 950m: only one of our pods fits at a time.
+  Monitoring components in Phase 5 need reduced CPU requests.
+- `flock` protects writers on one node (RWO). It is not reliable on NFS/RWX volumes.

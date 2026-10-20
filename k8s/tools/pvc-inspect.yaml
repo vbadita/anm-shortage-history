@@ -1,0 +1,42 @@
+# One-shot pod that prints what is on the anm-data PVC, then exits.
+#   kubectl apply -f k8s/tools/pvc-inspect.yaml && kubectl -n anm logs -f pvc-inspect
+#   kubectl -n anm delete pod pvc-inspect
+# Must satisfy the namespace's "restricted" Pod Security level like every other pod.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pvc-inspect
+  namespace: anm
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+    - name: inspect
+      image: anm-collector:04c7831        # reuse the app image: has sh, ls, du
+      imagePullPolicy: IfNotPresent
+      command: ["sh", "-c"]
+      args:
+        - |
+          echo "== df"; df -h /data | tail -1
+          echo "== /data"; ls -ln /data
+          echo "== /data/raw: $(ls /data/raw | wc -l) files, $(du -sh /data/raw | cut -f1)"
+          ls -ln /data/raw | head -4; echo "..."; ls -ln /data/raw | tail -2
+          echo "== manifest: $(($(wc -l < /data/manifest.csv)-1)) rows"
+          cut -d, -f1,3,9 /data/manifest.csv | tail -3
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+        limits: {memory: 64Mi}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: {drop: [ALL]}
+      volumeMounts:
+        - {name: data, mountPath: /data, readOnly: true}
+  volumes:
+    - name: data
+      persistentVolumeClaim: {claimName: anm-data}

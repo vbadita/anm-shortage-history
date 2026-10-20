@@ -28,7 +28,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: collector
-          image: anm-collector:e4e348a
+          image: anm-collector:04c7831
           imagePullPolicy: IfNotPresent   # loaded with `kind load`; no registry yet
           args: ["backfill"]
           envFrom:

@@ -54,3 +54,24 @@ the name maps to non-zero and refuses to run it. A fixed UID also makes volume o
 With the containerd image store, Docker keeps the compressed layer blobs (what registries store and nodes pull)
 and the unpacked snapshots. 48.7 MB compressed + 175 MB unpacked ≈ the 224 MB shown. Optimise the compressed size
 for pull time, the unpacked size for node disk.
+
+## Phase 4 — Kubernetes
+**What happens to the data when a pod dies? When is it actually lost?**
+Nothing: the PVC is a separate object bound to a PV; a new pod mounts the same volume (we killed a backfill pod
+mid-run, the replacement continued from row 15). Data is lost when the PVC is deleted and the StorageClass has
+`reclaimPolicy: Delete` — or when the node holding a local volume is lost.
+
+**Your container takes 30 s to stop. Why?**
+The process is PID 1 and has no SIGTERM handler; the kernel does not apply default signal actions to init, so
+SIGTERM is ignored and the kubelet SIGKILLs after `terminationGracePeriodSeconds`. Fix: handle SIGTERM (or run
+under an init like tini). Exec-form ENTRYPOINT keeps your process as PID 1 and receiving the signal.
+
+**`concurrencyPolicy: Forbid` — is that enough to guarantee a single writer?**
+No. It only prevents a CronJob overlapping with itself. Another Job, a manual `create job --from`, or a
+replacement pod created while the old one is still terminating can all overlap. Enforce it where the data is
+(a lock), and make the job idempotent.
+
+**Why requests but no CPU limit?**
+Requests reserve capacity for scheduling; a CPU limit enforces CFS throttling even when the node is idle, which
+only slows a short batch job. Memory is different: it cannot be throttled, so a memory limit is what protects the
+node (the container is OOM-killed instead).
