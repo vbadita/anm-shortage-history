@@ -71,3 +71,46 @@ def test_sigterm_mid_run_ends_cleanly(monkeypatch, tmp_path, capsys):
     events = [json.loads(line)["event"] for line in capsys.readouterr().out.splitlines()]
     assert code == cli.EXIT_FATAL
     assert events == ["run_start", "run_terminated", "run_end"]  # no request was made
+
+
+def _manifest_with(tmp_path, pdf_bytes):
+    """A data dir whose manifest lists one stored version with the given bytes."""
+    from anm_collector.storage import Catalog, Manifest, RawStore
+
+    cat = Catalog(RawStore(tmp_path / "raw"), Manifest(tmp_path / "manifest.csv"))
+    cat.ingest(pdf_bytes, url="https://x/a.pdf", file_date=None, source="live")
+
+
+def test_parse_rebuild_swaps_database_atomically(monkeypatch, tmp_path, capsys):
+    from pathlib import Path
+
+    from anm_collector import db
+
+    fixture = Path(__file__).parent / "fixtures" / "anm-2026-10-09-p1.pdf"
+    _manifest_with(tmp_path, fixture.read_bytes())
+    monkeypatch.setenv("ANM_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("ANM_PUSHGATEWAY_URL", raising=False)
+    assert cli.main(["parse"]) == cli.EXIT_OK
+    events = [json.loads(line)["event"] for line in capsys.readouterr().out.splitlines()]
+    assert "db_swapped" in events
+    assert not (tmp_path / "anm.sqlite.building").exists()
+    conn = db.connect(tmp_path / "anm.sqlite", readonly=True)
+    assert conn.execute("SELECT count(*) FROM rows").fetchone()[0] == 36
+
+
+def test_failed_rebuild_keeps_the_old_database(monkeypatch, tmp_path, capsys):
+    from anm_collector import db
+
+    old = db.connect(tmp_path / "anm.sqlite")
+    old.execute("INSERT INTO versions VALUES ('old', '2020-01-01', 'p', 'u', 1, 1, 0, 1, 't')")
+    old.commit()
+    old.close()
+    _manifest_with(tmp_path, b"%PDF-1.4\nnot really a pdf\n")  # passes magic bytes, unparseable
+    monkeypatch.setenv("ANM_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("ANM_PUSHGATEWAY_URL", raising=False)
+    assert cli.main(["parse"]) == cli.EXIT_PARSE_FAILED
+    parse_events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert any(e["event"] == "parse" and e["result"] == "error" for e in parse_events)
+    conn = db.connect(tmp_path / "anm.sqlite", readonly=True)
+    assert [r[0] for r in conn.execute("SELECT sha256 FROM versions")] == ["old"]
+    assert not (tmp_path / "anm.sqlite.building").exists()

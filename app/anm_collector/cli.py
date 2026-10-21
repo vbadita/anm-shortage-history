@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import signal
 import sys
 import time
@@ -136,9 +137,28 @@ def _collect(mode: str, cfg: Config, started: float) -> int:
         # parse handle everything pending (e.g. after a PARSER_VERSION bump).
         only = set(result.new_sha256) if mode == "sync" and result else None
         if only is None or only:
+            # `parse` = full rebuild into a side file, swapped in atomically only if every
+            # version parsed: readers never see a half-built history. sync/backfill append
+            # in place (one transaction per version).
+            target = (
+                cfg.db_path.with_name("anm.sqlite.building") if mode == "parse" else cfg.db_path
+            )
+            if mode == "parse":
+                target.unlink(missing_ok=True)  # leftover of an interrupted rebuild
             # closing(): `with conn` alone commits but does NOT close the connection
-            with closing(db.connect(cfg.db_path)) as conn:
+            with closing(db.connect(target)) as conn:
                 parse_run = parse_pending(cfg.data_dir, manifest.rows, conn, only=only)
+            if mode == "parse":
+                if parse_run.failed:
+                    target.unlink(missing_ok=True)  # keep serving the previous database
+                else:
+                    os.replace(target, cfg.db_path)  # atomic rename on the same filesystem
+                    log(
+                        "db_swapped",
+                        phase="parse",
+                        path=str(cfg.db_path),
+                        versions=len(parse_run.parsed),
+                    )
             if parse_run.failed and exit_code == EXIT_OK:
                 exit_code = EXIT_PARSE_FAILED
     except Terminated:

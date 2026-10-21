@@ -40,15 +40,15 @@ def parse_pending(
         started = time.monotonic()
         try:
             result = parse_pdf(data_dir / row.path)
-        except LayoutChanged as exc:
+        except Exception as exc:  # LayoutChanged, or a malformed PDF (pdfminer's own errors)
             log(
                 "parse",
                 logging.ERROR,
                 phase="parse",
                 url=row.original_url,
-                result="layout_changed",
+                result="layout_changed" if isinstance(exc, LayoutChanged) else "error",
                 file_date=row.file_date,
-                error=str(exc)[:300],
+                error=repr(exc)[:300],
             )
             run.failed.append(row.sha256)
             continue
