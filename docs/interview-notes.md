@@ -107,3 +107,19 @@ raw IP learn nothing. Trust `CF-Connecting-IP` only from those same ranges, or c
 **nginx returns 502 and the error log says "connect() … (13: Permission denied)". Cause?**
 SELinux: `httpd_t` may not connect to arbitrary ports. Check `ausearch -m AVC`. Narrow fix: label the upstream port
 `http_port_t` and enable `httpd_can_network_relay`; `httpd_can_network_connect` (any port) is broader than needed.
+
+## Phase 5b — Parser and search service
+**Your container works locally but crashes in the cluster with ModuleNotFoundError. Why, and how do you prevent it?**
+The lock file was incomplete (hand-curated) and the image installs with `--no-deps`, so a transitive dependency
+was missing; the dev venv had it. Generate locks by resolving in a fresh environment and freezing everything; run
+`pip check` in the image build so the build fails, not the pod.
+
+**Readiness vs liveness — what should each check?**
+Readiness: "can I serve traffic now?" (dependencies such as the database) — failing removes the pod from the
+Service, without restarting it. Liveness: "is the process wedged?" — failing restarts it. Never put an external
+dependency in liveness: an outage of the dependency becomes a crash loop of every pod.
+
+**How do you rebuild a dataset that a live service reads, without serving a half-built state?**
+Build into a new file/table and switch atomically (`rename(2)` on the same filesystem, a view swap, a blue/green
+table). Readers with the old file open keep reading it; new readers get the complete new one. Keep the old one if
+the build fails.

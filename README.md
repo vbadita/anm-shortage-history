@@ -276,7 +276,7 @@ lookback delta, or the series is "absent" between samples and `for:` never compl
 | Downloads by result | `sum by (result) (anm_downloads_total)` | new / duplicate / failed / invalid in the last run |
 | Latency p50/p95 | `histogram_quantile(0.95, sum by (le, source) (anm_request_duration_seconds_bucket))` | estimated request latency; interpolated inside buckets, so with few samples it is only as precise as the bucket bounds |
 
-## Public access: https://apps.badita.com/anm/ (Grafana)
+## Public access: https://apps.badita.com/anm/ (search) and /anm/grafana/ (Grafana)
 
 ```
 Browser ──TLS (Cloudflare edge cert)──► Cloudflare ──TLS, Full (strict)──► VM :443 nginx 1.26 ──► 172.18.0.2:30300
@@ -353,3 +353,44 @@ Product = folded name + form + strength. A name-only key would merge 69 genuinel
 
 **Known limitations:** truncated cells in a few versions (2024-02-14) create a separate one-version product;
 "not in the current file" means *no longer listed* — ANM does not say whether the shortage ended or the entry was removed.
+
+## Phase 5b — Checkpoint B: the search page
+
+**https://apps.badita.com/anm/** — search a medicine by brand name, DCI or holder; see whether it is in ANM's
+current list and how its status changed across all 68 versions, with a link to each original ANM PDF.
+Grafana moved to **https://apps.badita.com/anm/grafana/**.
+
+```
+Cloudflare ─► nginx :443 ─┬─ /anm/grafana/*  ─► Grafana  NodePort 30300
+                          └─ /anm/*          ─► anm-web  NodePort 30380 ─► /data/anm.sqlite (PVC, mounted read-only)
+CronJob anm-sync: download new PDF ─► parse it ─► append to anm.sqlite (one transaction)
+Job anm-parse:    full rebuild into anm.sqlite.building ─► os.replace() (atomic swap)
+```
+
+| Piece | Details |
+|---|---|
+| Web app | `app/anm_collector/web/` — FastAPI 0.142.2 + Jinja2, server-rendered, no JavaScript; Romanian UI; `python -m anm_collector.web` |
+| Routes | `/anm/` search, `/anm/produs?k=` history, `/anm/static/`; `/healthz` and `/metrics` outside `/anm` (not proxied, in-cluster only) |
+| Security | Jinja2 autoescape (tested with `<script>`), CSP `default-src 'none'`, `X-Frame-Options: DENY`, query ≤ 100 chars, read-only root FS and read-only data volume, restricted PSA |
+| Probes | readiness `/healthz` (database readable, ≥1 version) · liveness TCP only (restarting cannot fix a missing database) |
+| Metrics | scraped directly by a ServiceMonitor (long-running → no Pushgateway): `anm_web_requests_total{route,status}`, `anm_web_request_duration_seconds`, `anm_web_latest_version_timestamp_seconds`, `process_*` |
+| Alerts | `AnmWebDown` (`up == 0 or absent(up)` for 5m), `AnmParseFailing` (a downloaded version could not be parsed) |
+| SQLite | rollback journal (not WAL): a WAL reader must write `-shm`, impossible on a read-only mount |
+| Resources | web 10m / 96Mi, limit 256Mi (uses ~60 MiB). Parsing pods 25m / 128Mi, **limit 512Mi** — measured peak 312 MiB, the old 256Mi limit would have OOM-killed the first sync that parsed a new file |
+
+Deploy (after the image is loaded into kind):
+```bash
+kubectl apply -f k8s/40-cronjob-sync.yaml -f k8s/50-job-parse.yaml -f k8s/60-web.yaml -f k8s/61-web-servicemonitor.yaml
+kubectl -n anm wait --for=condition=Complete job/anm-parse --timeout=3600s     # ~17 min on the 1-CPU node
+sudo semanage port -a -t http_port_t -p tcp 30380 && sudo install -m 0644 deploy/nginx/apps.badita.com.conf /etc/nginx/conf.d/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Dependency hygiene learned the hard way: the first web pod crashed with `No module named 'opentelemetry'` — the lock file
+had been built from a hand-written package list. Now `scripts/lock.sh` resolves in a fresh venv and freezes everything,
+the Docker build runs `pip check`, `app/constraints.txt` holds back transitive packages, and
+`scripts/check-lock-age.sh` fails if any locked package is younger than 14 days (it caught 5).
+
+Notes: `kubectl apply -f k8s/` fails on `30-job-backfill.yaml` once that Job exists (a Job's pod template is immutable);
+apply files individually until Phase 8 (Kustomize/Argo CD) handles run-once Jobs. A request served during an nginx
+reload may still use the old config (old workers finish requests on existing keep-alive connections).
