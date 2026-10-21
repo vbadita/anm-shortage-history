@@ -50,27 +50,35 @@ def client(tmp_path, monkeypatch):
 
 
 def test_search_shows_status_and_links(client):
-    r = client.get("/anm/", params={"q": "substantia"})
+    r = client.get("/istoric-lipsa-medicament-vaccin/", params={"q": "substantia"})
     assert r.status_code == 200
     assert "ALFA 10 mg" in r.text and "BETA 10 mg" in r.text
     assert "În lista curentă" in r.text and "Nu mai apare" in r.text
     assert "01.02.2024" in r.text  # Romanian date format
-    assert "/anm/produs?k=ALFA10MG%7CCOMPR.%7C10MG" in r.text  # key URL-encoded
+    assert (
+        "/istoric-lipsa-medicament-vaccin/produs?k=ALFA10MG%7CCOMPR.%7C10MG" in r.text
+    )  # key URL-encoded
 
 
 def test_product_page_history_and_source_link(client):
-    r = client.get("/anm/produs", params={"k": product_key("ALFA 10 mg", "COMPR.", "10mg")})
+    r = client.get(
+        "/istoric-lipsa-medicament-vaccin/produs",
+        params={"k": product_key("ALFA 10 mg", "COMPR.", "10mg")},
+    )
     assert r.status_code == 200
     assert "Nu apare în listă" in r.text  # absent in 2024-02-01
     assert 'href="https://www.anm.ro/_/x/2024-01-01.pdf"' in r.text
 
 
 def test_unknown_product_is_404(client):
-    assert client.get("/anm/produs", params={"k": "NOPE|X|Y"}).status_code == 404
+    assert (
+        client.get("/istoric-lipsa-medicament-vaccin/produs", params={"k": "NOPE|X|Y"}).status_code
+        == 404
+    )
 
 
 def test_query_is_escaped_not_executed(client):
-    r = client.get("/anm/", params={"q": "<script>alert(1)</script>"})
+    r = client.get("/istoric-lipsa-medicament-vaccin/", params={"q": "<script>alert(1)</script>"})
     assert "<script>alert(1)</script>" not in r.text
     assert "&lt;script&gt;" in r.text
     assert (
@@ -79,15 +87,19 @@ def test_query_is_escaped_not_executed(client):
 
 
 def test_overlong_query_rejected(client):
-    assert client.get("/anm/", params={"q": "x" * 101}).status_code == 422
+    assert (
+        client.get("/istoric-lipsa-medicament-vaccin/", params={"q": "x" * 101}).status_code == 422
+    )
 
 
 def test_health_and_metrics_are_outside_the_public_prefix(client):
     assert client.get("/healthz").text.startswith("ok 2 versions, latest 2024-02-01")
-    client.get("/anm/", params={"q": "alfa"})
+    client.get("/istoric-lipsa-medicament-vaccin/", params={"q": "alfa"})
     m = client.get("/metrics").text
-    assert 'anm_web_requests_total{route="/anm/",status="200"}' in m
-    assert client.get("/anm/metrics").status_code == 404  # not exposed under /anm
+    assert 'anm_web_requests_total{route="/istoric-lipsa-medicament-vaccin/",status="200"}' in m
+    assert (
+        client.get("/istoric-lipsa-medicament-vaccin/metrics").status_code == 404
+    )  # not exposed under the public prefix
 
 
 def test_healthz_503_without_database(tmp_path, monkeypatch):
@@ -96,13 +108,15 @@ def test_healthz_503_without_database(tmp_path, monkeypatch):
 
 
 def test_typo_is_auto_corrected_not_reported_as_no_shortage(client):
-    r = client.get("/anm/", params={"q": "alffa"})  # one letter off ALFA
+    r = client.get(
+        "/istoric-lipsa-medicament-vaccin/", params={"q": "alffa"}
+    )  # one letter off ALFA
     assert "Rezultate pentru <strong>ALFA</strong>" in r.text
     assert "ALFA 10 mg" in r.text
 
 
 def test_unknown_name_does_not_claim_no_shortage(client):
-    r = client.get("/anm/", params={"q": "zzzzqqq"})
+    r = client.get("/istoric-lipsa-medicament-vaccin/", params={"q": "zzzzqqq"})
     assert "Niciun rezultat" in r.text
     assert "Verificați scrierea" in r.text
     assert "nu are discontinuitate" not in r.text

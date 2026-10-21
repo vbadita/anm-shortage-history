@@ -1,4 +1,4 @@
-# Public search page (nginx forwards https://apps.badita.com/anm/* to NodePort 30380).
+# Public search page (nginx forwards https://apps.badita.com/istoric-lipsa-medicament-vaccin/* to NodePort 30380).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -34,7 +34,7 @@ spec:
           command: ["python", "-m", "anm_collector.web"]
           env:
             - {name: ANM_DATA_DIR, value: /data}
-            - {name: ANM_BASE_PATH, value: /anm}
+            - {name: ANM_BASE_PATH, value: /istoric-lipsa-medicament-vaccin}
             - {name: PORT, value: "8080"}
           ports:
             - {name: http, containerPort: 8080}

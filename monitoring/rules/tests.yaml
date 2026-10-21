@@ -223,7 +223,7 @@ tests:
             exp_annotations:
               summary: The ANM search page is not being scraped (down or missing)
               description: >-
-                Prometheus cannot scrape anm-web. The public page https://apps.badita.com/anm/
+                Prometheus cannot scrape anm-web. The public page https://apps.badita.com/istoric-lipsa-medicament-vaccin/
                 is probably down too.
               runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmwebdown
 

@@ -24,7 +24,7 @@ from ..logs import log
 
 HERE = Path(__file__).parent
 DATA_DIR = Path(os.environ.get("ANM_DATA_DIR", "data"))
-BASE_PATH = os.environ.get("ANM_BASE_PATH", "/anm").rstrip("/")
+BASE_PATH = os.environ.get("ANM_BASE_PATH", "/istoric-lipsa-medicament-vaccin").rstrip("/")
 SOURCE_PAGE = (
     "https://www.anm.ro/medicamente-de-uz-uman/autorizare-medicamente/"
     "notificari-discontinuitate-medicamente/"

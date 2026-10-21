@@ -46,4 +46,4 @@ Each alert in `monitoring/rules/anm-rules.yaml` links here. First commands assum
 **Meaning:** Prometheus cannot scrape `anm-web` (or the target disappeared). Severity: critical.
 1. `kubectl -n anm get deploy,pods -l app.kubernetes.io/name=anm-web` — CrashLoopBackOff? `kubectl -n anm logs deploy/anm-web --previous`.
 2. Not Ready (readiness = `/healthz`): the database is missing or unreadable → run the parse Job.
-3. Public side: `curl -I https://apps.badita.com/anm/` — 502 from nginx means the NodePort/upstream; check `sudo tail /var/log/nginx/apps.badita.com.error.log` (SELinux denials show as `13: Permission denied`).
+3. Public side: `curl -I https://apps.badita.com/istoric-lipsa-medicament-vaccin/` — 502 from nginx means the NodePort/upstream; check `sudo tail /var/log/nginx/apps.badita.com.error.log` (SELinux denials show as `13: Permission denied`).
