@@ -31,7 +31,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: collector
-          image: anm-collector:68bf7be
+          image: anm-collector:7c54ee5
           imagePullPolicy: IfNotPresent
           args: ["parse"]
           envFrom:

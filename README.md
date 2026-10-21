@@ -399,3 +399,18 @@ reload may still use the old config (old workers finish requests on existing kee
 **Path change (2026-10-21):** the search page moved from `/anm/` to `/istoric-lipsa-medicament-vaccin/` (set by `ANM_BASE_PATH`; every
 template link uses it). nginx answers `/anm/...` with a permanent redirect to the same path and query under the new
 prefix, so shared links keep working; Grafana stays at `/anm/grafana/` (longest prefix wins in nginx).
+
+## Search engines (SEO)
+
+| Piece | Where | Notes |
+|---|---|---|
+| `robots.txt` | nginx, domain root | `Allow: /` + `Sitemap:`; Cloudflare's managed robots.txt prepends its content-signal comments |
+| `sitemap.xml` | `/istoric-lipsa-medicament-vaccin/sitemap.xml` (web app) | home + one URL per product (3,299); `lastmod` = newest ANM version listing the product |
+| titles / descriptions | templates | product description summarises the current status (Google often uses it as the snippet) |
+| canonical | home + product pages | same encoding as links and sitemap (tested), so one URL per page |
+| `noindex, follow` | default in `base.html`; search results, 404 | only home and product pages are indexable |
+
+Getting indexed (manual, needs the site owner's Google account): Google Search Console → add **Domain property**
+`badita.com` (TXT record in Cloudflare DNS) → Sitemaps → submit the sitemap URL → URL Inspection → *Request indexing*
+for the home page. Google's Indexing API is only allowed for job postings and livestreams. Bing/Yandex: enable
+Cloudflare *Crawler Hints* (IndexNow).
