@@ -12,6 +12,8 @@ import time
 from contextlib import closing
 from datetime import date
 from pathlib import Path
+from urllib.parse import quote
+from xml.sax.saxutils import escape
 
 from fastapi import FastAPI, Query, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -25,6 +27,8 @@ from ..logs import log
 HERE = Path(__file__).parent
 DATA_DIR = Path(os.environ.get("ANM_DATA_DIR", "data"))
 BASE_PATH = os.environ.get("ANM_BASE_PATH", "/istoric-lipsa-medicament-vaccin").rstrip("/")
+# Absolute URLs (sitemap, canonical) need the public origin, not the pod's address.
+PUBLIC_ORIGIN = os.environ.get("ANM_PUBLIC_ORIGIN", "https://apps.badita.com").rstrip("/")
 SOURCE_PAGE = (
     "https://www.anm.ro/medicamente-de-uz-uman/autorizare-medicamente/"
     "notificari-discontinuitate-medicamente/"
@@ -106,6 +110,7 @@ def common(conn: sqlite3.Connection) -> dict:
         "latest": latest,
         "version_count": len(vs),
         "source_page": SOURCE_PAGE,
+        "origin": PUBLIC_ORIGIN,
     }
 
 
@@ -159,8 +164,37 @@ def product_page(request: Request, k: str = Query(..., max_length=400)):
             "p": first,
             "periods": list(reversed(periods)),
             "in_latest": bool(periods) and periods[-1].listed,
+            "first_seen": periods[0].first if periods else None,
+            "last_listed": next((x for x in reversed(periods) if x.listed), None),
+            "key": k,
         },
     )
+
+
+def product_url(key: str) -> str:
+    """Same encoding as the templates' |urlencode (keeps '/'): one URL per product
+    in links, canonical tags and the sitemap - otherwise Google sees duplicates."""
+    return f"{PUBLIC_ORIGIN}{BASE_PATH}/produs?k={quote(key, safe='/')}"
+
+
+@app.get(f"{BASE_PATH}/sitemap.xml")
+def sitemap():
+    """Home + every product page. lastmod = publication date of the newest ANM
+    version that lists the product (when its information last came from ANM)."""
+    with closing(open_db()) as conn:
+        latest = conn.execute("SELECT max(file_date) FROM versions").fetchone()[0]
+        products = conn.execute(
+            "SELECT r.product_key, max(v.file_date) FROM rows r JOIN versions v USING (sha256) "
+            "GROUP BY r.product_key ORDER BY r.product_key"
+        ).fetchall()
+    urls = [(f"{PUBLIC_ORIGIN}{BASE_PATH}/", latest)] + [(product_url(k), d) for k, d in products]
+    body = "".join(f"<url><loc>{escape(u)}</loc><lastmod>{d}</lastmod></url>\n" for u, d in urls)
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{body}</urlset>\n"
+    )
+    return Response(xml, media_type="application/xml")
 
 
 @app.get("/healthz", response_class=PlainTextResponse)

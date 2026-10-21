@@ -1,5 +1,9 @@
 {% extends "base.html" %}
-{% block title %}{{ p.name }}{% endblock %}
+{% block title %}{{ p.name }} – istoric discontinuitate{% endblock %}
+{% block meta %}
+  <meta name="description" content="{{ p.name }} ({{ p.form }}, DCI {{ p.dci }}): {% if in_latest %}apare în lista curentă ANM de discontinuități ({{ latest.file_date|ro_date }}){% else %}nu mai apare în lista ANM de discontinuități{% if last_listed %} din {{ last_listed.last|ro_date }}{% endif %}{% endif %}{% if last_listed %}; ultima notificare: {{ last_listed.notice_type }}{% if last_listed.resume_raw %}, reluare estimată {{ last_listed.resume_raw }}{% endif %}{% endif %}. Istoric din {{ first_seen|ro_date }}.">
+  <link rel="canonical" href="{{ origin }}{{ base }}/produs?k={{ key|urlencode }}">
+{% endblock %}
 {% block content %}
 <h1>{{ p.name }}</h1>
 <p class="facts">{{ p.form }} · {{ p.strength }} · DCI: <strong>{{ p.dci }}</strong> · {{ p.holder }} ({{ p.country }})</p>

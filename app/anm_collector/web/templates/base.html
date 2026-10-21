@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Discontinuități medicamente{% endblock %} · istoric ANM</title>
+  <title>{% block title %}Istoric lipsă medicamente și vaccinuri{% endblock %} · ANM</title>
+  {# Safe default: a page is NOT indexed unless its template says so (home, product pages). #}
+  {% block meta %}<meta name="robots" content="noindex, follow">{% endblock %}
   <link rel="stylesheet" href="{{ base }}/static/style.css">
 </head>
 <body>

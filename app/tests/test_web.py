@@ -120,3 +120,44 @@ def test_unknown_name_does_not_claim_no_shortage(client):
     assert "Niciun rezultat" in r.text
     assert "Verificați scrierea" in r.text
     assert "nu are discontinuitate" not in r.text
+
+
+B = web.BASE_PATH
+
+
+def test_sitemap_lists_home_and_products_with_canonical_urls(client):
+    import xml.etree.ElementTree as ET
+
+    r = client.get(f"{B}/sitemap.xml")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/xml")
+    ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    urls = {
+        u.find("s:loc", ns).text: u.find("s:lastmod", ns).text
+        for u in ET.fromstring(r.content).findall("s:url", ns)
+    }
+    home = f"{web.PUBLIC_ORIGIN}{B}/"
+    alfa = web.product_url(product_key("ALFA 10 mg", "COMPR.", "10mg"))
+    assert urls[home] == "2024-02-01"  # newest version
+    assert urls[alfa] == "2024-01-01"  # last version listing ALFA
+    assert len(urls) == 3  # home + 2 products
+    # the sitemap URL is exactly the canonical URL of the page
+    page = client.get(alfa.removeprefix(web.PUBLIC_ORIGIN)).text
+    assert f'<link rel="canonical" href="{alfa}">' in page
+
+
+def test_indexing_rules(client):
+    home = client.get(f"{B}/").text
+    assert (
+        '<link rel="canonical"' in home and 'name="description"' in home and "noindex" not in home
+    )
+    results = client.get(f"{B}/", params={"q": "alfa"}).text
+    assert '<meta name="robots" content="noindex, follow">' in results
+    missing = client.get(f"{B}/produs", params={"k": "NOPE"}).text
+    assert "noindex" in missing
+
+
+def test_product_description_summarises_status(client):
+    r = client.get(f"{B}/produs", params={"k": product_key("ALFA 10 mg", "COMPR.", "10mg")})
+    assert "<title>ALFA 10 mg \N{EN DASH} istoric discontinuitate · ANM</title>" in r.text
+    assert "nu mai apare în lista ANM de discontinuități din 01.01.2024" in r.text
+    assert "reluare estimată mar.24" in r.text

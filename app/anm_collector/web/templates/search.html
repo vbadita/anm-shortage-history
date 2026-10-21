@@ -1,8 +1,13 @@
 {% extends "base.html" %}
-{% block title %}{% if q %}„{{ q }}”{% else %}Căutare{% endif %}{% endblock %}
+{% block title %}{% if q %}„{{ q }}” – căutare{% else %}Istoric lipsă medicamente și vaccinuri{% endif %}{% endblock %}
+{% block meta %}{% if not q %}
+  <meta name="description" content="Caută orice medicament sau vaccin și vezi dacă apare în lista ANM de discontinuități (lipsă temporară sau permanentă) și cum s-a schimbat statusul din 2017 până azi.">
+  <link rel="canonical" href="{{ origin }}{{ base }}/">
+{% else %}<meta name="robots" content="noindex, follow">{# internal search results: not for the index #}{% endif %}{% endblock %}
 {% block content %}
 {% if not q %}
   <section class="intro">
+    <h1>Istoric lipsă medicamente și vaccinuri</h1>
     <p>Caută un medicament după <strong>denumirea comercială</strong>, <strong>substanța activă (DCI)</strong>
        sau <strong>deținătorul autorizației</strong>. Pentru fiecare produs vezi statusul din lista curentă
        și cum s-a schimbat de-a lungul timpului.</p>
