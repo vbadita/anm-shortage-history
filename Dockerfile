@@ -9,7 +9,8 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 RUN python -m venv /opt/venv
 COPY app/requirements.txt /tmp/requirements.txt
 # --no-deps: install exactly the lock file; nothing unpinned can sneak in.
-RUN /opt/venv/bin/pip install --no-deps -r /tmp/requirements.txt
+RUN /opt/venv/bin/pip install --no-deps -r /tmp/requirements.txt \
+ && /opt/venv/bin/pip check   # incomplete lock -> the BUILD fails, not the running pod
 
 # ---- runtime: base + venv + code, nothing else ----
 FROM ${PYTHON_IMAGE}
