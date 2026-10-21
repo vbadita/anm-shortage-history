@@ -276,7 +276,7 @@ lookback delta, or the series is "absent" between samples and `for:` never compl
 | Downloads by result | `sum by (result) (anm_downloads_total)` | new / duplicate / failed / invalid in the last run |
 | Latency p50/p95 | `histogram_quantile(0.95, sum by (le, source) (anm_request_duration_seconds_bucket))` | estimated request latency; interpolated inside buckets, so with few samples it is only as precise as the bucket bounds |
 
-## Public access: https://apps.badita.com/anm/ (search) and /anm/grafana/ (Grafana)
+## Public access: https://apps.badita.com/istoric-lipsa-medicament-vaccin/ (search) and /anm/grafana/ (Grafana)
 
 ```
 Browser ──TLS (Cloudflare edge cert)──► Cloudflare ──TLS, Full (strict)──► VM :443 nginx 1.26 ──► 172.18.0.2:30300
@@ -356,13 +356,14 @@ Product = folded name + form + strength. A name-only key would merge 69 genuinel
 
 ## Phase 5b — Checkpoint B: the search page
 
-**https://apps.badita.com/anm/** — search a medicine by brand name, DCI or holder; see whether it is in ANM's
+**https://apps.badita.com/istoric-lipsa-medicament-vaccin/** — search a medicine by brand name, DCI or holder; see whether it is in ANM's
 current list and how its status changed across all 68 versions, with a link to each original ANM PDF.
 Grafana moved to **https://apps.badita.com/anm/grafana/**.
 
 ```
 Cloudflare ─► nginx :443 ─┬─ /anm/grafana/*  ─► Grafana  NodePort 30300
-                          └─ /anm/*          ─► anm-web  NodePort 30380 ─► /data/anm.sqlite (PVC, mounted read-only)
+                          ├─ /istoric-lipsa-medicament-vaccin/* ─► anm-web  NodePort 30380 ─► /data/anm.sqlite (PVC, read-only)
+                          └─ /anm/*          ─► 301 to the path above (old links)
 CronJob anm-sync: download new PDF ─► parse it ─► append to anm.sqlite (one transaction)
 Job anm-parse:    full rebuild into anm.sqlite.building ─► os.replace() (atomic swap)
 ```
@@ -394,3 +395,7 @@ the Docker build runs `pip check`, `app/constraints.txt` holds back transitive p
 Notes: `kubectl apply -f k8s/` fails on `30-job-backfill.yaml` once that Job exists (a Job's pod template is immutable);
 apply files individually until Phase 8 (Kustomize/Argo CD) handles run-once Jobs. A request served during an nginx
 reload may still use the old config (old workers finish requests on existing keep-alive connections).
+
+**Path change (2026-10-21):** the search page moved from `/anm/` to `/istoric-lipsa-medicament-vaccin/` (set by `ANM_BASE_PATH`; every
+template link uses it). nginx answers `/anm/...` with a permanent redirect to the same path and query under the new
+prefix, so shared links keep working; Grafana stays at `/anm/grafana/` (longest prefix wins in nginx).
