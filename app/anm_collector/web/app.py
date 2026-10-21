@@ -6,14 +6,16 @@ Public routes live under BASE_PATH (/anm), which is all nginx forwards.
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import time
 from contextlib import closing
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 from xml.sax.saxutils import escape
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Query, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -62,6 +64,7 @@ def ro_date(iso: str | None) -> str:
 
 
 templates.env.filters["ro_date"] = ro_date
+templates.env.filters["ro_datetime"] = lambda dt: dt.strftime("%d.%m.%Y, %H:%M")
 
 
 def open_db() -> sqlite3.Connection:
@@ -102,10 +105,27 @@ async def observe(request: Request, call_next):
     return response
 
 
+LOCAL_TZ = ZoneInfo("Europe/Bucharest")
+STALE_AFTER = timedelta(hours=26)  # same threshold as the AnmSyncStale alert
+
+
+def last_check() -> tuple[datetime | None, bool]:
+    """(time of the last successful check of the ANM source, is it stale?)"""
+    try:
+        data = json.loads((DATA_DIR / "last_sync.json").read_text(encoding="utf-8"))
+        when = datetime.fromisoformat(data["last_success_utc"])
+    except (OSError, ValueError, KeyError):
+        return None, False
+    return when.astimezone(LOCAL_TZ), datetime.now(UTC) - when > STALE_AFTER
+
+
 def common(conn: sqlite3.Connection) -> dict:
     vs = queries.versions(conn)
     latest = vs[-1] if vs else None
+    checked_at, check_stale = last_check()
     return {
+        "checked_at": checked_at,
+        "check_stale": check_stale,
         "base": BASE_PATH,
         "latest": latest,
         "version_count": len(vs),

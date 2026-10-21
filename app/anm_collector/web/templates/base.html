@@ -21,6 +21,11 @@
 {% block content %}{% endblock %}
 </main>
 <footer>
+  {% if checked_at %}
+  <p class="{{ 'stale' if check_stale else '' }}">Ultima verificare automată a sursei ANM:
+     <strong>{{ checked_at|ro_datetime }}</strong> (ora României){% if check_stale %} — verificarea zilnică nu a mai reușit
+     de atunci; datele pot fi neactualizate{% endif %}.</p>
+  {% endif %}
   {% if latest %}
   <p>Date din <strong>{{ version_count }}</strong> versiuni ale listei publicate de ANM; cea mai recentă:
      <a href="{{ latest.original_url }}">{{ latest.file_date|ro_date }}</a>.

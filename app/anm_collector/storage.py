@@ -7,6 +7,7 @@ import csv
 import fcntl
 import hashlib
 import io
+import json
 import os
 import tempfile
 import zipfile
@@ -54,6 +55,22 @@ def sha256_hex(data: bytes) -> str:
 def wayback_digest(data: bytes) -> str:
     """The Wayback CDX 'digest' field: base32(SHA-1(body))."""
     return base64.b32encode(hashlib.sha1(data).digest()).decode()
+
+
+def write_json_atomic(path: Path, obj: object) -> None:
+    """Readers (the web pod) see the old file or the new one, never a partial write."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
+    try:
+        os.fchmod(fd, 0o644)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(obj, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 class LockHeld(RuntimeError):

@@ -13,6 +13,7 @@ import traceback
 import uuid
 from collections import Counter
 from contextlib import closing
+from datetime import UTC, datetime
 
 import requests
 
@@ -24,7 +25,7 @@ from .http import STOP, PoliteClient, Terminated
 from .ingest import ParseRun, parse_pending
 from .logs import log, setup_logging
 from .metrics import RunMetrics
-from .storage import Catalog, LockHeld, Manifest, RawStore, RunLock
+from .storage import Catalog, LockHeld, Manifest, RawStore, RunLock, write_json_atomic
 
 EXIT_OK, EXIT_DOWNLOAD_FAILED, EXIT_FATAL, EXIT_METRICS_PUSH_FAILED, EXIT_PARSE_FAILED = (
     0,
@@ -180,6 +181,19 @@ def _collect(mode: str, cfg: Config, started: float) -> int:
         exit_code = EXIT_FATAL
 
     success = exit_code == EXIT_OK
+    if success and mode in ("sync", "backfill"):
+        # "When did we last successfully check ANM?" - shown on the public page.
+        try:
+            write_json_atomic(
+                cfg.data_dir / "last_sync.json",
+                {
+                    "last_success_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+                    "mode": mode,
+                    "new_versions": result.new_versions if result else 0,
+                },
+            )
+        except OSError as exc:
+            log("status_write", logging.WARNING, phase="report", result="failed", error=repr(exc))
     metrics.record_run(result.outcomes if result else Counter(), discovered, manifest.rows)
     if parse_run:
         metrics.record_parse(len(parse_run.parsed), len(parse_run.failed), parse_run.pending_after)

@@ -117,3 +117,16 @@ def test_second_run_lock_is_refused_and_released(tmp_path):
         pass
     with RunLock(lock_path):  # released on exit
         pass
+
+
+def test_write_json_atomic(tmp_path):
+    import json
+
+    from anm_collector.storage import write_json_atomic
+
+    target = tmp_path / "s.json"
+    write_json_atomic(target, {"a": 1})
+    write_json_atomic(target, {"a": 2})
+    assert json.loads(target.read_text()) == {"a": 2}
+    assert target.stat().st_mode & 0o777 == 0o644
+    assert [p.name for p in tmp_path.iterdir()] == ["s.json"]  # no temp files left

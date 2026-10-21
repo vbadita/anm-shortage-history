@@ -11,7 +11,8 @@
     <p>Caută un medicament după <strong>denumirea comercială</strong>, <strong>substanța activă (DCI)</strong>
        sau <strong>deținătorul autorizației</strong>. Pentru fiecare produs vezi statusul din lista curentă
        și cum s-a schimbat de-a lungul timpului.</p>
-    {% if latest %}<p>Lista curentă ({{ latest.file_date|ro_date }}) conține <strong>{{ listed_now }}</strong> produse.</p>{% endif %}
+    {% if latest %}<p>Lista curentă ANM (publicată {{ latest.file_date|ro_date }}) conține <strong>{{ listed_now }}</strong> produse.
+       {% if checked_at %}Sursa verificată ultima dată: <strong>{{ checked_at|ro_datetime }}</strong>.{% endif %}</p>{% endif %}
   </section>
 {% elif too_short %}
   <p class="note">Introduceți cel puțin 3 caractere.</p>

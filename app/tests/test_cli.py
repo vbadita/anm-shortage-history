@@ -114,3 +114,20 @@ def test_failed_rebuild_keeps_the_old_database(monkeypatch, tmp_path, capsys):
     conn = db.connect(tmp_path / "anm.sqlite", readonly=True)
     assert [r[0] for r in conn.execute("SELECT sha256 FROM versions")] == ["old"]
     assert not (tmp_path / "anm.sqlite.building").exists()
+
+
+def test_successful_sync_records_last_check_failed_one_does_not(monkeypatch, tmp_path):
+    from anm_collector.collector import RunResult
+
+    monkeypatch.setenv("ANM_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("ANM_PUSHGATEWAY_URL", raising=False)
+    status = tmp_path / "last_sync.json"
+
+    monkeypatch.setattr(cli.Collector, "sync", lambda self: (RunResult(failed=["u"]), {}))
+    assert cli.main(["sync"]) == cli.EXIT_DOWNLOAD_FAILED
+    assert not status.exists()
+
+    monkeypatch.setattr(cli.Collector, "sync", lambda self: (RunResult(), {}))
+    assert cli.main(["sync"]) == cli.EXIT_OK
+    data = json.loads(status.read_text())
+    assert data["mode"] == "sync" and data["last_success_utc"].endswith("+00:00")

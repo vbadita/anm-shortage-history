@@ -161,3 +161,31 @@ def test_product_description_summarises_status(client):
     assert "<title>ALFA 10 mg \N{EN DASH} istoric discontinuitate · ANM</title>" in r.text
     assert "nu mai apare în lista ANM de discontinuități din 01.01.2024" in r.text
     assert "reluare estimată mar.24" in r.text
+
+
+def _write_status(tmp_path, when):
+    import json
+
+    (tmp_path / "last_sync.json").write_text(json.dumps({"last_success_utc": when.isoformat()}))
+
+
+def test_last_check_shown_in_romanian_time(client, tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC).replace(microsecond=0)
+    _write_status(tmp_path, now - timedelta(hours=1))
+    r = client.get(f"{B}/")
+    local = (now - timedelta(hours=1)).astimezone(web.LOCAL_TZ).strftime("%d.%m.%Y, %H:%M")
+    assert f"Ultima verificare automată a sursei ANM:\n     <strong>{local}</strong>" in r.text
+    assert "neactualizate" not in r.text
+
+
+def test_stale_check_is_flagged(client, tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    _write_status(tmp_path, datetime.now(UTC) - timedelta(hours=30))
+    assert "datele pot fi neactualizate" in client.get(f"{B}/").text
+
+
+def test_no_status_file_hides_the_line(client):
+    assert "Ultima verificare" not in client.get(f"{B}/").text
