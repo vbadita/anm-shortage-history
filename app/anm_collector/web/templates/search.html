@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{% if q %}„{{ q }}”{% else %}Căutare{% endif %}{% endblock %}
+{% block content %}
+{% if not q %}
+  <section class="intro">
+    <p>Caută un medicament după <strong>denumirea comercială</strong>, <strong>substanța activă (DCI)</strong>
+       sau <strong>deținătorul autorizației</strong>. Pentru fiecare produs vezi statusul din lista curentă
+       și cum s-a schimbat de-a lungul timpului.</p>
+    {% if latest %}<p>Lista curentă ({{ latest.file_date|ro_date }}) conține <strong>{{ listed_now }}</strong> produse.</p>{% endif %}
+  </section>
+{% elif too_short %}
+  <p class="note">Introduceți cel puțin 3 caractere.</p>
+{% elif not results %}
+  <p class="note">Niciun rezultat pentru „{{ q }}”. Un produs care nu a apărut niciodată în aceste notificări nu are
+     discontinuitate raportată la ANM.</p>
+{% else %}
+  <p class="note">{{ results|length }} produs(e) pentru „{{ q }}”{% if results|length >= max_results %} (primele {{ max_results }}; rafinați căutarea){% endif %}.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Medicament</th><th>DCI</th><th>Deținător</th><th>Status</th><th>Ultima notificare</th><th>Reluare estimată</th></tr></thead>
+    <tbody>
+    {% for p in results %}
+      <tr>
+        <td><a href="{{ base }}/produs?k={{ p.product_key|urlencode }}">{{ p.name }}</a>
+            <div class="sub">{{ p.form }} · {{ p.strength }}</div></td>
+        <td>{{ p.dci }}</td>
+        <td>{{ p.holder }}</td>
+        <td>{% if p.in_latest %}<span class="badge now">În lista curentă</span>
+            {% else %}<span class="badge gone">Nu mai apare</span><div class="sub">ultima dată: {{ p.last_seen|ro_date }}</div>{% endif %}</td>
+        <td>{{ p.notice_type }}<div class="sub">{{ p.notice_date|ro_date }}</div></td>
+        <td>{{ p.resume_raw or "–" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+{% endif %}
+{% endblock %}

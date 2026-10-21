@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Discontinuități medicamente{% endblock %} · istoric ANM</title>
+  <link rel="stylesheet" href="{{ base }}/static/style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="{{ base }}/">Discontinuități medicamente <span>· istoricul notificărilor ANM</span></a>
+  <form action="{{ base }}/" method="get" role="search">
+    <input type="search" name="q" value="{{ q|default('') }}" minlength="3" maxlength="100"
+           placeholder="Denumire comercială, DCI sau deținător" aria-label="Caută" autofocus>
+    <button type="submit">Caută</button>
+  </form>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+<footer>
+  {% if latest %}
+  <p>Date din <strong>{{ version_count }}</strong> versiuni ale listei publicate de ANM; cea mai recentă:
+     <a href="{{ latest.original_url }}">{{ latest.file_date|ro_date }}</a>.
+     Sursa: <a href="{{ source_page }}">ANM – Notificări discontinuitate medicamente</a>.</p>
+  {% endif %}
+  <p class="disclaimer">Proiect independent, neafiliat ANM. Informațiile sunt extrase automat din fișierele PDF publicate
+     de ANM și pot conține erori de extragere; verificați întotdeauna fișierul oficial (link la fiecare intrare).
+     Nu reprezintă sfat medical. „Nu mai apare în listă” nu înseamnă că medicamentul este disponibil.</p>
+</footer>
+</body>
+</html>

@@ -1,7 +1,8 @@
 """SQLite store for parsed versions. One file, read-only for the web app.
 
-WAL mode: the web app keeps reading while a sync appends a new version.
-Each version is inserted in one transaction, so readers never see half a file.
+Rollback-journal mode (not WAL): the web pod mounts the volume read-only, and a
+WAL reader must write the -shm file. Each version is one ~1 s transaction a day;
+readers wait for it (busy timeout) and never see half a file.
 """
 
 from __future__ import annotations
@@ -47,13 +48,18 @@ CREATE INDEX IF NOT EXISTS rows_sha ON rows(sha256);
 """
 
 
+BUSY_TIMEOUT_S = 10
+
+
 def connect(path: Path, readonly: bool = False) -> sqlite3.Connection:
     if readonly:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, check_same_thread=False)
+        conn = sqlite3.connect(
+            f"file:{path}?mode=ro", uri=True, timeout=BUSY_TIMEOUT_S, check_same_thread=False
+        )
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(path)
-        conn.execute("PRAGMA journal_mode=WAL")
+        conn = sqlite3.connect(path, timeout=BUSY_TIMEOUT_S)
+        conn.execute("PRAGMA journal_mode=DELETE")  # persistent; converts an old WAL database
         conn.execute("PRAGMA foreign_keys=ON")
         conn.executescript(SCHEMA)
     conn.row_factory = sqlite3.Row

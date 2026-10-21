@@ -1,0 +1,24 @@
+:root { --fg:#1d232a; --muted:#5b6672; --line:#d9dee3; --bg:#ffffff; --accent:#0b5cad; --now:#b42318; --nowbg:#fdecea; --gone:#4b5563; --gonebg:#eceef1; }
+@media (prefers-color-scheme: dark) { :root { --fg:#e6e9ec; --muted:#9aa5b1; --line:#36404a; --bg:#14181c; --accent:#6aa8ff; --now:#ff8a80; --nowbg:#3a1d1b; --gone:#c3c9d0; --gonebg:#2a3038; } }
+* { box-sizing:border-box; }
+body { margin:0; font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--fg); background:var(--bg); }
+header, main, footer { max-width:1100px; margin:0 auto; padding:0 16px; }
+header { padding-top:20px; padding-bottom:12px; border-bottom:1px solid var(--line); }
+.brand { font-weight:700; font-size:1.2rem; color:var(--fg); text-decoration:none; }
+.brand span { font-weight:400; color:var(--muted); }
+form { display:flex; gap:8px; margin-top:12px; }
+input[type=search] { flex:1; min-width:0; padding:10px 12px; font:inherit; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+button { padding:10px 16px; font:inherit; border:0; border-radius:6px; background:var(--accent); color:#fff; cursor:pointer; }
+main { padding-top:16px; padding-bottom:24px; }
+h1 { font-size:1.4rem; margin:8px 0 4px; } h2 { font-size:1.1rem; margin-top:24px; }
+a { color:var(--accent); }
+.note, .facts, .sub { color:var(--muted); } .sub { font-size:.85rem; }
+.table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; font-size:.95rem; }
+th, td { text-align:left; vertical-align:top; padding:8px 10px; border-bottom:1px solid var(--line); }
+th { font-size:.8rem; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); white-space:nowrap; }
+tr.absent td { color:var(--muted); font-style:italic; }
+.badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:.8rem; font-weight:600; white-space:nowrap; }
+.badge.now { color:var(--now); background:var(--nowbg); } .badge.gone { color:var(--gone); background:var(--gonebg); }
+footer { border-top:1px solid var(--line); padding-top:12px; padding-bottom:32px; font-size:.85rem; color:var(--muted); }
+.disclaimer { font-size:.8rem; }

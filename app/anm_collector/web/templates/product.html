@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ p.name }}{% endblock %}
+{% block content %}
+<h1>{{ p.name }}</h1>
+<p class="facts">{{ p.form }} · {{ p.strength }} · DCI: <strong>{{ p.dci }}</strong> · {{ p.holder }} ({{ p.country }})</p>
+<p>{% if in_latest %}<span class="badge now">În lista curentă ({{ latest.file_date|ro_date }})</span>
+   {% else %}<span class="badge gone">Nu mai apare în lista curentă ({{ latest.file_date|ro_date }})</span>{% endif %}</p>
+
+<h2>Istoric</h2>
+<p class="note">Cel mai recent primul. Fiecare rând grupează versiunile consecutive ale listei în care informația nu s-a schimbat.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Versiunile listei</th><th>Tip notificare</th><th>Data notificării</th><th>Reluare estimată</th><th>Observații</th><th>Sursă</th></tr></thead>
+  <tbody>
+  {% for per in periods %}
+    {% if per.listed %}
+    <tr>
+      <td>{{ per.first|ro_date }}{% if per.last != per.first %} – {{ per.last|ro_date }}{% endif %}
+          <div class="sub">{{ per.versions }} versiun{{ "e" if per.versions == 1 else "i" }}</div></td>
+      <td>{{ per.notice_type }}</td>
+      <td>{{ per.notice_date|ro_date }}</td>
+      <td>{{ per.resume_raw or "–" }}</td>
+      <td>{{ per.remarks }}</td>
+      <td><a href="{{ per.source_urls[-1] }}">PDF ANM</a></td>
+    </tr>
+    {% else %}
+    <tr class="absent">
+      <td>{{ per.first|ro_date }}{% if per.last != per.first %} – {{ per.last|ro_date }}{% endif %}</td>
+      <td colspan="5">Nu apare în listă ({{ per.versions }} versiun{{ "e" if per.versions == 1 else "i" }})</td>
+    </tr>
+    {% endif %}
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
