@@ -414,3 +414,8 @@ Getting indexed (manual, needs the site owner's Google account): Google Search C
 `badita.com` (TXT record in Cloudflare DNS) → Sitemaps → submit the sitemap URL → URL Inspection → *Request indexing*
 for the home page. Google's Indexing API is only allowed for job postings and livestreams. Bing/Yandex: enable
 Cloudflare *Crawler Hints* (IndexNow).
+
+**"Last checked" on the page:** after every successful `sync`/`backfill` the job writes `/data/last_sync.json`
+(atomic temp-file + rename). The web app shows it in Romanian time next to the publication date of the newest ANM
+list — two different facts: *we checked today* vs *ANM last published on …*. Older than 26 h (the `AnmSyncStale`
+threshold) → the page says the daily check has not succeeded since then.

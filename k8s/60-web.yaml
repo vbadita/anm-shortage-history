@@ -29,7 +29,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web
-          image: anm-collector:7c54ee5
+          image: anm-collector:9292d12
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "anm_collector.web"]
           env:
