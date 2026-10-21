@@ -113,7 +113,7 @@ def common(conn: sqlite3.Connection) -> dict:
 def search_page(request: Request, q: str = Query("", max_length=100)):
     with closing(open_db()) as conn:
         ctx = common(conn)
-        results = queries.search(conn, q) if q.strip() else []
+        outcome = queries.search_tolerant(conn, q) if q.strip() else queries.SearchOutcome([])
         listed_now = (
             conn.execute(
                 "SELECT count(DISTINCT product_key) FROM rows WHERE sha256 = ?",
@@ -128,7 +128,9 @@ def search_page(request: Request, q: str = Query("", max_length=100)):
         {
             **ctx,
             "q": q,
-            "results": results,
+            "results": outcome.results,
+            "corrected_to": outcome.corrected_to,
+            "suggestions": outcome.suggestions,
             "listed_now": listed_now,
             "too_short": bool(q.strip()) and len(q.strip()) < 3,
             "max_results": queries.MAX_RESULTS,

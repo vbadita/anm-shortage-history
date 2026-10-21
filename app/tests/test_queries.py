@@ -72,3 +72,14 @@ def test_search_matches_brand_and_dci_and_flags_current(conn):
     )
     assert queries.search(conn, "alfa10")[0].name == "ALFA 10 mg"  # space-insensitive
     assert queries.search(conn, "al") == []  # too short: no full scan
+
+
+def test_suggest_and_tolerant_search(conn):
+    assert queries.suggest(conn, "alffa")[0][0] == "ALFA"
+    outcome = queries.search_tolerant(conn, "substantai")  # transposed letters in the DCI
+    assert outcome.corrected_to == "SUBSTANTIA" and {p.name for p in outcome.results} == {
+        "ALFA 10 mg",
+        "BETA 10 mg",
+    }
+    assert queries.search_tolerant(conn, "alfa").corrected_to is None  # exact hit: no correction
+    assert queries.search_tolerant(conn, "qqqqqq").results == []

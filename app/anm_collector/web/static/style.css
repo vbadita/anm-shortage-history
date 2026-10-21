@@ -22,3 +22,4 @@ tr.absent td { color:var(--muted); font-style:italic; }
 .badge.now { color:var(--now); background:var(--nowbg); } .badge.gone { color:var(--gone); background:var(--gonebg); }
 footer { border-top:1px solid var(--line); padding-top:12px; padding-bottom:32px; font-size:.85rem; color:var(--muted); }
 .disclaimer { font-size:.8rem; }
+.corrected { padding:8px 12px; border-left:3px solid var(--accent); background:var(--gonebg); }

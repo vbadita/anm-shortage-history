@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import difflib
+import re
 import sqlite3
 from dataclasses import dataclass, field
 
@@ -140,3 +142,56 @@ def history(conn: sqlite3.Connection, key: str) -> list[Period]:
                 )
             )
     return periods
+
+
+# ---- typo tolerance ----------------------------------------------------------
+# A misspelled brand name ("varilix") must not look like "no shortage reported".
+AUTO_CORRECT_RATIO = 0.8  # VARILRIX vs VARILIX = 0.93; unrelated words score far lower
+_vocab_cache: dict[tuple, list[str]] = {}
+
+
+def _vocabulary(conn: sqlite3.Connection) -> list[str]:
+    """Distinct folded words (>= 4 letters) of brand names and DCIs; cached per DB content."""
+    key = conn.execute("SELECT count(*), max(parsed_at) FROM versions").fetchone()
+    if key not in _vocab_cache:
+        words: set[str] = set()
+        for name, dci in conn.execute("SELECT DISTINCT name, dci FROM rows"):
+            words.update(
+                w
+                for w in re.split(r"[^A-Z0-9]+", fold(f"{name} {dci}"))
+                if len(w) >= 4 and not w.isdigit()
+            )
+        _vocab_cache.clear()
+        _vocab_cache[key] = sorted(words)
+    return _vocab_cache[key]
+
+
+def suggest(conn: sqlite3.Connection, query: str, n: int = 5) -> list[tuple[str, float]]:
+    """Known words closest to the query, best first, as (word, similarity 0..1)."""
+    q = fold(query).replace(" ", "")
+    if len(q) < 3:
+        return []
+    vocab = _vocabulary(conn)
+    close = difflib.get_close_matches(q, vocab, n=n, cutoff=0.7)
+    return [(w, difflib.SequenceMatcher(None, q, w).ratio()) for w in close]
+
+
+@dataclass
+class SearchOutcome:
+    results: list[ProductSummary]
+    corrected_to: str | None = None  # results are for this word, not the query
+    suggestions: list[str] = field(default_factory=list)
+
+
+def search_tolerant(conn: sqlite3.Connection, query: str) -> SearchOutcome:
+    """Exact (substring) search; if empty, auto-correct to a very close known word."""
+    results = search(conn, query)
+    if results or len(fold(query)) < 3:
+        return SearchOutcome(results)
+    close = suggest(conn, query)
+    if close and close[0][1] >= AUTO_CORRECT_RATIO:
+        best = close[0][0]
+        return SearchOutcome(
+            search(conn, best), corrected_to=best, suggestions=[w for w, _ in close[1:]]
+        )
+    return SearchOutcome([], suggestions=[w for w, _ in close])

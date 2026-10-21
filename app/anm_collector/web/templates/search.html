@@ -11,10 +11,14 @@
 {% elif too_short %}
   <p class="note">Introduceți cel puțin 3 caractere.</p>
 {% elif not results %}
-  <p class="note">Niciun rezultat pentru „{{ q }}”. Un produs care nu a apărut niciodată în aceste notificări nu are
-     discontinuitate raportată la ANM.</p>
+  <p class="note">Niciun rezultat pentru „{{ q }}”. Verificați scrierea denumirii sau căutați după substanța activă (DCI).</p>
+  {% if suggestions %}<p>Denumiri apropiate: {% for s in suggestions %}<a href="{{ base }}/?q={{ s|urlencode }}">{{ s }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+  <p class="note">Dacă denumirea este corectă și nu apare: produsul nu figurează în nicio versiune a listei de notificări ANM
+     din 2017 încoace. Pentru disponibilitate, verificați cu farmacia sau ANM.</p>
 {% else %}
-  <p class="note">{{ results|length }} produs(e) pentru „{{ q }}”{% if results|length >= max_results %} (primele {{ max_results }}; rafinați căutarea){% endif %}.</p>
+  {% if corrected_to %}<p class="corrected">Rezultate pentru <strong>{{ corrected_to }}</strong> (ați căutat „{{ q }}”).
+     {% if suggestions %}Alte denumiri apropiate: {% for s in suggestions %}<a href="{{ base }}/?q={{ s|urlencode }}">{{ s }}</a>{% if not loop.last %}, {% endif %}{% endfor %}.{% endif %}</p>{% endif %}
+  <p class="note">{{ results|length }} produs(e) pentru „{{ corrected_to or q }}”{% if results|length >= max_results %} (primele {{ max_results }}; rafinați căutarea){% endif %}.</p>
   <div class="table-wrap">
   <table>
     <thead><tr><th>Medicament</th><th>DCI</th><th>Deținător</th><th>Status</th><th>Ultima notificare</th><th>Reluare estimată</th></tr></thead>

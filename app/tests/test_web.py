@@ -93,3 +93,16 @@ def test_health_and_metrics_are_outside_the_public_prefix(client):
 def test_healthz_503_without_database(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "DATA_DIR", tmp_path / "empty")
     assert TestClient(web.app).get("/healthz").status_code == 503
+
+
+def test_typo_is_auto_corrected_not_reported_as_no_shortage(client):
+    r = client.get("/anm/", params={"q": "alffa"})  # one letter off ALFA
+    assert "Rezultate pentru <strong>ALFA</strong>" in r.text
+    assert "ALFA 10 mg" in r.text
+
+
+def test_unknown_name_does_not_claim_no_shortage(client):
+    r = client.get("/anm/", params={"q": "zzzzqqq"})
+    assert "Niciun rezultat" in r.text
+    assert "Verificați scrierea" in r.text
+    assert "nu are discontinuitate" not in r.text
