@@ -1,0 +1,81 @@
+# Public search page (nginx forwards https://apps.badita.com/anm/* to NodePort 30380).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anm-web
+  namespace: anm
+  labels:
+    app.kubernetes.io/name: anm-web
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}   # new pod must be Ready before the old one goes
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anm-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: anm-web
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: anm-collector:1182b93
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "anm_collector.web"]
+          env:
+            - {name: ANM_DATA_DIR, value: /data}
+            - {name: ANM_BASE_PATH, value: /anm}
+            - {name: PORT, value: "8080"}
+          ports:
+            - {name: http, containerPort: 8080}
+          # Ready = database readable and non-empty. Not ready -> no traffic, but no restart.
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+            failureThreshold: 3
+          # Alive = process accepts connections. Not tied to the database: restarting
+          # cannot fix a missing database, it would only add a crash loop.
+          livenessProbe:
+            tcpSocket: {port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests: {cpu: 10m, memory: 96Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: data, mountPath: /data, readOnly: true}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: anm-data
+            readOnly: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anm-web
+  namespace: anm
+  labels:
+    app.kubernetes.io/name: anm-web
+spec:
+  type: NodePort          # reachable on the kind node's Docker bridge IP only; nginx is the public entry
+  selector:
+    app.kubernetes.io/name: anm-web
+  ports:
+    - {name: http, port: 80, targetPort: http, nodePort: 30380}

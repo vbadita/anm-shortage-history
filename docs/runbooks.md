@@ -35,3 +35,15 @@ Each alert in `monitoring/rules/anm-rules.yaml` links here. First commands assum
 **Meaning:** no new file for 30 days. Severity: info (not paged). Often normal: median gap is ~36 days.
 1. Open the page; is a file still linked? Does `sync` log `page_fetch` with a non-empty `links` list?
 2. If the page links a different kind of file or a different folder, update discovery.
+
+## AnmParseFailing
+**Meaning:** a downloaded version could not be parsed (`LayoutChanged` or malformed PDF); the search page misses it. Severity: warning.
+1. Logs: `kubectl -n anm logs job/<name> | jq 'select(.event=="parse" and .result!="ok")'` — the error says which header/row was unexpected.
+2. Open the PDF (link in the log `url`). If ANM changed the table, adapt `parse.py`, add the page as a test fixture, bump `PARSER_VERSION`.
+3. Rebuild: `kubectl -n anm delete job anm-parse --ignore-not-found && kubectl apply -f k8s/50-job-parse.yaml` (atomic swap; the old database keeps serving meanwhile).
+
+## AnmWebDown
+**Meaning:** Prometheus cannot scrape `anm-web` (or the target disappeared). Severity: critical.
+1. `kubectl -n anm get deploy,pods -l app.kubernetes.io/name=anm-web` — CrashLoopBackOff? `kubectl -n anm logs deploy/anm-web --previous`.
+2. Not Ready (readiness = `/healthz`): the database is missing or unreadable → run the parse Job.
+3. Public side: `curl -I https://apps.badita.com/anm/` — 502 from nginx means the NodePort/upstream; check `sudo tail /var/log/nginx/apps.badita.com.error.log` (SELinux denials show as `13: Permission denied`).

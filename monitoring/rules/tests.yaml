@@ -182,3 +182,48 @@ tests:
                 Not necessarily a fault: ANM's median gap is ~36 days. Check that the page still
                 links the file from the same place (the source may have moved).
               runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmnonewversionlong
+
+  # ---- AnmParseFailing -------------------------------------------------------
+  - name: a version could not be parsed
+    interval: 1m
+    input_series:
+      - series: 'anm_parse_versions_total{job="anm_collector",mode="sync",result="ok"}'
+        values: '0x10'
+      - series: 'anm_parse_versions_total{job="anm_collector",mode="sync",result="failed"}'
+        values: '0x4 1x5'
+    alert_rule_test:
+      - alertname: AnmParseFailing
+        eval_time: 3m
+        exp_alerts: []
+      - alertname: AnmParseFailing
+        eval_time: 6m
+        exp_alerts:
+          - exp_labels: {severity: warning, service: anm, job: anm_collector, mode: sync}
+            exp_annotations:
+              summary: Last sync run could not parse 1 version(s)
+              description: >-
+                A stored PDF could not be parsed; the search page does not include it.
+                Check the run's logs for event=parse result!=ok.
+              runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmparsefailing
+
+  # ---- AnmWebDown ------------------------------------------------------------
+  - name: web target down, then target gone
+    interval: 1m
+    input_series:
+      - series: 'up{job="anm-web",instance="10.0.0.1:8080"}'
+        values: '1x4 0x10'                 # down from t=5m, series ends at t=14m
+    alert_rule_test:
+      - alertname: AnmWebDown
+        eval_time: 4m
+        exp_alerts: []
+      - alertname: AnmWebDown
+        eval_time: 11m                     # down for 6m > for: 5m
+        exp_alerts:
+          - exp_labels: {severity: critical, service: anm, job: anm-web, instance: "10.0.0.1:8080"}
+            exp_annotations:
+              summary: The ANM search page is not being scraped (down or missing)
+              description: >-
+                Prometheus cannot scrape anm-web. The public page https://apps.badita.com/anm/
+                is probably down too.
+              runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmwebdown
+

@@ -56,7 +56,7 @@ alertmanager:
       limits: {memory: 128Mi}
 
 grafana:
-  # Public URL: https://apps.badita.com/anm/ via Cloudflare -> nginx on the host -> this NodePort.
+  # Public URL: https://apps.badita.com/anm/grafana/ via Cloudflare -> nginx on the host -> this NodePort.
   # The NodePort is only reachable on the kind node's Docker bridge IP (172.18.0.x), not publicly.
   service:
     type: NodePort
@@ -64,7 +64,7 @@ grafana:
   grafana.ini:
     server:
       domain: apps.badita.com
-      root_url: https://apps.badita.com/anm/
+      root_url: https://apps.badita.com/anm/grafana/
       serve_from_sub_path: true      # Grafana itself serves under /anm/ (nginx passes the path through)
     security:
       cookie_secure: true            # session cookie only over HTTPS

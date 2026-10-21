@@ -1,0 +1,16 @@
+# A long-running service is scraped directly - no Pushgateway (compare the batch job).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: anm-web
+  namespace: anm
+  labels:
+    app.kubernetes.io/name: anm-web
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anm-web
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s

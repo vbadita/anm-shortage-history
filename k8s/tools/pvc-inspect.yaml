@@ -17,7 +17,7 @@ spec:
     seccompProfile: {type: RuntimeDefault}
   containers:
     - name: inspect
-      image: anm-collector:04c7831        # reuse the app image: has sh, ls, du
+      image: anm-collector:1182b93        # reuse the app image: has sh, ls, du
       imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:

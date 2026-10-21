@@ -100,7 +100,7 @@ class RunMetrics:
 
     def record_parse(self, parsed: int, failed: int, pending_after: int) -> None:
         self.parsed.labels("ok").inc(parsed)
-        self.parsed.labels("layout_changed").inc(failed)
+        self.parsed.labels("failed").inc(failed)  # layout changed or malformed PDF
         self.unparsed.set(pending_after)
 
     def finish(self, started_monotonic: float, success: bool) -> None:

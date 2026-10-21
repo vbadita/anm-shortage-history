@@ -122,3 +122,36 @@ spec:
               Not necessarily a fault: ANM's median gap is ~36 days. Check that the page still
               links the file from the same place (the source may have moved).
             runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmnonewversionlong
+
+        - alert: AnmParseFailing
+          # The PDF was downloaded but could not be parsed (layout changed or malformed):
+          # the search page silently stops updating. Per-run counter, like downloads.
+          expr: |
+            sum by (job, mode) (
+              anm_parse_versions_total{job="anm_collector", result="failed"}
+            ) > 0
+          labels:
+            severity: warning
+            service: anm
+          annotations:
+            summary: Last {{ $labels.mode }} run could not parse {{ $value }} version(s)
+            description: >-
+              A stored PDF could not be parsed; the search page does not include it.
+              Check the run's logs for event=parse result!=ok.
+            runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmparsefailing
+
+        - alert: AnmWebDown
+          # Long-running service: plain up==0, plus absent() for when the target vanishes
+          # (Deployment deleted, ServiceMonitor broken) and up stops existing at all.
+          expr: up{job="anm-web"} == 0 or absent(up{job="anm-web"})
+          for: 5m
+          labels:
+            severity: critical
+            service: anm
+          annotations:
+            summary: The ANM search page is not being scraped (down or missing)
+            description: >-
+              Prometheus cannot scrape anm-web. The public page https://apps.badita.com/anm/
+              is probably down too.
+            runbook_url: https://github.com/vbadita/anm-shortage-history/blob/main/docs/runbooks.md#anmwebdown
+
