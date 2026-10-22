@@ -419,3 +419,9 @@ Cloudflare *Crawler Hints* (IndexNow).
 (atomic temp-file + rename). The web app shows it in Romanian time next to the publication date of the newest ANM
 list — two different facts: *we checked today* vs *ANM last published on …*. Older than 26 h (the `AnmSyncStale`
 threshold) → the page says the daily check has not succeeded since then.
+
+## apps.badita.com directory page
+
+`https://apps.badita.com/` lists the public apps on this host (`deploy/portal/`: static HTML +
+CSS, no JavaScript, CSP `default-src 'none'; style-src 'self'`). Adding an app: add a card to
+`deploy/portal/index.html`, then `deploy/portal/install.sh`.
